@@ -22,6 +22,18 @@
 ///   ],
 /// )
 /// ```
+///
+/// When the list comes from your own API as JSON, fetch it in the host app and
+/// map it with [ExternalSubtitle.listFromJson]:
+///
+/// ```dart
+/// final res = await http.get(
+///   Uri.parse('https://api.example.com/videos/123/subtitles'),
+///   headers: {'Authorization': 'Bearer $token'},
+/// );
+/// final subs = ExternalSubtitle.listFromJson(jsonDecode(res.body) as List);
+/// PlayerSource.network(videoUrl, externalSubtitles: subs);
+/// ```
 class ExternalSubtitle {
   /// HTTP(S) URL or absolute file path to the subtitle file.
   final String uri;
@@ -45,6 +57,42 @@ class ExternalSubtitle {
     return labelToUri.entries
         .map((e) => ExternalSubtitle(uri: e.value, title: e.key))
         .toList();
+  }
+
+  /// Creates an [ExternalSubtitle] from a decoded JSON object.
+  ///
+  /// Expects `{ "url": "...", "title": "...", "language": "..." }`. The `uri`
+  /// key is also accepted as an alias for `url`. Throws [FormatException] if no
+  /// subtitle URL is present (it is required).
+  factory ExternalSubtitle.fromJson(Map<String, dynamic> json) {
+    final uri = (json['url'] ?? json['uri']) as String?;
+    if (uri == null || uri.isEmpty) {
+      throw const FormatException(
+        'ExternalSubtitle.fromJson: missing "url"/"uri" field',
+      );
+    }
+    return ExternalSubtitle(
+      uri: uri,
+      title: json['title'] as String?,
+      language: json['language'] as String?,
+    );
+  }
+
+  /// Maps a decoded JSON array (e.g. an API response) to a list of subtitles.
+  ///
+  /// Entries that are not objects or lack a URL are skipped, so one malformed
+  /// item never discards the whole list.
+  static List<ExternalSubtitle> listFromJson(List<dynamic> jsonList) {
+    final result = <ExternalSubtitle>[];
+    for (final item in jsonList) {
+      if (item is! Map<String, dynamic>) continue;
+      try {
+        result.add(ExternalSubtitle.fromJson(item));
+      } on FormatException {
+        // Skip invalid entries.
+      }
+    }
+    return result;
   }
 
   @override

@@ -84,6 +84,24 @@ final _presets = <_Preset>[
       title: 'Sintel',
     ),
   ),
+  _Preset(
+    title: 'External subtitles (URL list)',
+    subtitle: 'MP4 + subs mapped via ExternalSubtitle.listFromJson',
+    icon: Icons.subtitles_outlined,
+    source: PlayerSource.network(
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      title: 'External subtitles demo',
+      // Simulates a decoded API response of [{title, language, url}, ...].
+      externalSubtitles: ExternalSubtitle.listFromJson(const [
+        {
+          'title': 'English',
+          'language': 'en',
+          'url':
+              'https://raw.githubusercontent.com/brenopolanski/html5-video-webvtt-example/master/MIB2-subtitles-pt-BR.vtt',
+        },
+      ]),
+    ),
+  ),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
