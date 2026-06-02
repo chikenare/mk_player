@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show DeviceOrientation;
 import 'package:media_kit_video/media_kit_video.dart' show SubtitleViewConfiguration;
 
 import 'video_fit.dart';
@@ -90,6 +91,30 @@ class PlayerConfig {
   /// button (desktop) or a pinch gesture (mobile).
   final VideoFit initialVideoFit;
 
+  // ── Orientation ───────────────────────────────────────────────────────────
+
+  /// Automatically lock the device orientation when the player mounts
+  /// (mobile only). Uses [fullscreenOrientations] if set; otherwise waits for
+  /// the first video frame and auto-detects landscape vs portrait from the
+  /// video's aspect ratio. Restores system default when the player is disposed.
+  final bool autoOrientation;
+
+  // ── Fullscreen orientation ────────────────────────────────────────────────
+
+  /// Device orientations allowed when the player enters fullscreen on mobile.
+  ///
+  /// When `null` (default) the player auto-detects the video's aspect ratio
+  /// and locks to landscape for horizontal videos or portrait for vertical ones.
+  ///
+  /// Supply an explicit list to override that logic, e.g.:
+  /// ```dart
+  /// fullscreenOrientations: [
+  ///   DeviceOrientation.landscapeLeft,
+  ///   DeviceOrientation.landscapeRight,
+  /// ]
+  /// ```
+  final List<DeviceOrientation>? fullscreenOrientations;
+
   // ── Subtitles ─────────────────────────────────────────────────────────────
 
   /// Styling for the rendered subtitle overlay (font, colour, background,
@@ -128,6 +153,8 @@ class PlayerConfig {
     this.accentColor = const Color(0xFFE50914),
     this.aspectRatio,
     this.initialVideoFit = VideoFit.contain,
+    this.autoOrientation = false,
+    this.fullscreenOrientations,
     this.subtitleViewConfiguration,
     this.onCompleted,
     this.onError,
@@ -154,6 +181,8 @@ class PlayerConfig {
     Color? accentColor,
     double? aspectRatio,
     VideoFit? initialVideoFit,
+    bool? autoOrientation,
+    List<DeviceOrientation>? fullscreenOrientations,
     SubtitleViewConfiguration? subtitleViewConfiguration,
     VoidCallback? onCompleted,
     void Function(String)? onError,
@@ -182,6 +211,9 @@ class PlayerConfig {
       accentColor: accentColor ?? this.accentColor,
       aspectRatio: aspectRatio ?? this.aspectRatio,
       initialVideoFit: initialVideoFit ?? this.initialVideoFit,
+      autoOrientation: autoOrientation ?? this.autoOrientation,
+      fullscreenOrientations:
+          fullscreenOrientations ?? this.fullscreenOrientations,
       subtitleViewConfiguration:
           subtitleViewConfiguration ?? this.subtitleViewConfiguration,
       onCompleted: onCompleted ?? this.onCompleted,

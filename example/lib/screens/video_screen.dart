@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mk_player/mk_player.dart';
 
 /// Full-screen video screen that wraps [PlayerView].
@@ -23,7 +24,12 @@ class _VideoScreenState extends State<VideoScreen> {
       config: const PlayerConfig(
         autoPlay: true,
         useWakelock: true,
+        autoOrientation: true,
         accentColor: Color(0xFFE50914),
+        fullscreenOrientations: [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
         controlsTimeoutSeconds: 4,
       ),
     );

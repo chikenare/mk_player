@@ -76,6 +76,19 @@ class CustomPlayerController extends ChangeNotifier {
   String? get currentPosterUrl => _currentPosterUrl;
   bool get posterVisible => _posterVisible;
 
+  // ── Video orientation ──────────────────────────────────────────────────────
+
+  // True when the video's display aspect ratio is portrait (height > width).
+  // Updated whenever the player emits new videoParams (e.g. after the first
+  // decoded frame). Used by PlayerView to pick fullscreen orientations.
+  bool _isPortraitVideo = false;
+  bool get isPortraitVideo => _isPortraitVideo;
+
+  // True once the first valid videoParams have been received (aspect > 0).
+  // Used by PlayerView to know when auto-orientation can be safely applied.
+  bool _videoParamsReceived = false;
+  bool get videoParamsReceived => _videoParamsReceived;
+
   // ── Live ───────────────────────────────────────────────────────────────────
 
   // Set explicitly from PlayerSource.isLive — never auto-detected.
@@ -223,6 +236,7 @@ class CustomPlayerController extends ChangeNotifier {
       _player.stream.track.listen(_handleTrack),
       _player.stream.completed.listen(_handleCompleted),
       _player.stream.error.listen(_handleError),
+      _player.stream.videoParams.listen(_handleVideoParams),
     ]);
   }
 
@@ -273,6 +287,7 @@ class CustomPlayerController extends ChangeNotifier {
     _currentTitle = source.title;
     _storyboard = null;
     _isLive = source.isLive;
+    _videoParamsReceived = false;
     _pendingStartAt = source.startAt;
     _externalSubtitles = source.externalSubtitles;
     _currentPosterUrl = source.posterUrl;
@@ -533,6 +548,16 @@ class CustomPlayerController extends ChangeNotifier {
       _notify();
       config.onCompleted?.call();
     }
+  }
+
+  void _handleVideoParams(VideoParams params) {
+    if (_disposed) return;
+    final aspect = params.aspect;
+    if (aspect != null && aspect > 0) {
+      _isPortraitVideo = aspect < 1.0;
+      _videoParamsReceived = true;
+    }
+    _notify();
   }
 
   void _handleError(String error) {

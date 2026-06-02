@@ -44,14 +44,39 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
   @override
   void initState() {
     super.initState();
-    // Listen to OS-level fullscreen transitions (green button, Cmd+Ctrl+F,
-    // Esc in fullscreen) so our state stays in sync even when the user
-    // exits fullscreen without pressing our button.
     if (isDesktopPlatform) windowManager.addListener(this);
+    _initAutoOrientation();
+  }
+
+  void _initAutoOrientation() {
+    if (!isMobilePlatform) return;
+    if (!_cfg.autoOrientation) return;
+
+    final explicit = _cfg.fullscreenOrientations;
+    if (explicit != null) {
+      // Explicit list provided — apply immediately.
+      SystemChrome.setPreferredOrientations(explicit);
+    } else {
+      // Auto-detect: wait for videoParams to arrive before applying.
+      widget.controller.addListener(_onControllerForOrientation);
+    }
+  }
+
+  void _onControllerForOrientation() {
+    if (!widget.controller.videoParamsReceived) return;
+    widget.controller.removeListener(_onControllerForOrientation);
+    final orientations = widget.controller.isPortraitVideo
+        ? [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]
+        : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight];
+    SystemChrome.setPreferredOrientations(orientations);
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onControllerForOrientation);
+    if (isMobilePlatform && _cfg.autoOrientation) {
+      SystemChrome.setPreferredOrientations([]);
+    }
     if (isDesktopPlatform) windowManager.removeListener(this);
     super.dispose();
   }
@@ -94,11 +119,18 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
       // On macOS/Windows/Linux: let the OS manage the window.
       await windowManager.setFullScreen(true);
     } else {
-      // On mobile: lock to landscape + hide system UI, then push a covering route.
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      // On mobile: lock to the video's natural orientation + hide system UI,
+      // then push a covering route.
+      // Allowing both orientations of the same axis lets the device auto-rotate
+      // (e.g. landscapeLeft ↔ landscapeRight) without exiting fullscreen.
+      final orientations = _cfg.fullscreenOrientations ??
+          (widget.controller.isPortraitVideo
+              ? [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]
+              : [
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ]);
+      await SystemChrome.setPreferredOrientations(orientations);
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       if (!mounted) return;
       await Navigator.of(context).push(
@@ -118,12 +150,8 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
       if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      // Empty list = restore system default (honours the user's rotation lock).
+      await SystemChrome.setPreferredOrientations([]);
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     if (mounted) setState(() => _isFullscreen = false);
@@ -134,7 +162,11 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
 // Video canvas — shared between embedded and _FullscreenRoute
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _VideoCanvas extends StatelessWidget {
+// StatefulWidget so the Video surface is stable and never wrapped in a
+// ListenableBuilder. Rebuilding Video on every position tick (~60 Hz) causes
+// Android to invalidate the native Texture, producing a permanent black screen.
+// Only videoFit changes trigger a setState here.
+class _VideoCanvas extends StatefulWidget {
   final CustomPlayerController controller;
   final PlayerConfig config;
   final bool isFullscreen;
@@ -148,6 +180,41 @@ class _VideoCanvas extends StatelessWidget {
   });
 
   @override
+  State<_VideoCanvas> createState() => _VideoCanvasState();
+}
+
+class _VideoCanvasState extends State<_VideoCanvas> {
+  late BoxFit _fit;
+
+  @override
+  void initState() {
+    super.initState();
+    _fit = _boxFitOf(widget.controller.videoFit);
+    widget.controller.addListener(_onControllerChange);
+  }
+
+  @override
+  void didUpdateWidget(_VideoCanvas old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      old.controller.removeListener(_onControllerChange);
+      widget.controller.addListener(_onControllerChange);
+      _fit = _boxFitOf(widget.controller.videoFit);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChange);
+    super.dispose();
+  }
+
+  void _onControllerChange() {
+    final newFit = _boxFitOf(widget.controller.videoFit);
+    if (newFit != _fit) setState(() => _fit = newFit);
+  }
+
+  @override
   Widget build(BuildContext context) {
     Widget canvas = ClipRect(
       child: ColoredBox(
@@ -156,27 +223,26 @@ class _VideoCanvas extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             // ── 1. Video surface ───────────────────────────────────────────
-            ListenableBuilder(
-              listenable: controller,
-              builder: (_, _) => Video(
-                controller: controller.videoController,
-                controls: NoVideoControls,
-                fit: _boxFitOf(controller.videoFit),
-                fill: Colors.black,
-                subtitleViewConfiguration:
-                    config.subtitleViewConfiguration ??
-                        const SubtitleViewConfiguration(),
-              ),
+            // Direct child — never rebuilt by the controller's notification
+            // stream. Only _fit changes (rare) cause a setState above.
+            Video(
+              controller: widget.controller.videoController,
+              controls: NoVideoControls,
+              fit: _fit,
+              fill: Colors.black,
+              subtitleViewConfiguration:
+                  widget.config.subtitleViewConfiguration ??
+                      const SubtitleViewConfiguration(),
             ),
 
             // ── 1.5. Poster — fades out on first decoded frame ────────────
             ListenableBuilder(
-              listenable: controller,
+              listenable: widget.controller,
               builder: (_, _) {
-                final url = controller.currentPosterUrl;
+                final url = widget.controller.currentPosterUrl;
                 if (url == null) return const SizedBox.shrink();
                 return AnimatedOpacity(
-                  opacity: controller.posterVisible ? 1.0 : 0.0,
+                  opacity: widget.controller.posterVisible ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 350),
                   child: _PosterOverlay(url: url),
                 );
@@ -184,11 +250,13 @@ class _VideoCanvas extends StatelessWidget {
             ),
 
             // ── 2. Buffering spinner ───────────────────────────────────────
-            if (config.showBufferingIndicator)
+            if (widget.config.showBufferingIndicator)
               ListenableBuilder(
-                listenable: controller,
+                listenable: widget.controller,
                 builder: (_, _) {
-                  final show = controller.isBuffering || controller.isLoading;
+                  final show =
+                      widget.controller.isBuffering ||
+                      widget.controller.isLoading;
                   return show
                       ? const _BufferingIndicator()
                       : const SizedBox.shrink();
@@ -197,12 +265,12 @@ class _VideoCanvas extends StatelessWidget {
 
             // ── 3. Error overlay ───────────────────────────────────────────
             ListenableBuilder(
-              listenable: controller,
+              listenable: widget.controller,
               builder: (ctx, _) {
-                if (!controller.hasError) return const SizedBox.shrink();
+                if (!widget.controller.hasError) return const SizedBox.shrink();
                 return PlayerErrorOverlay(
-                  message: controller.errorMessage,
-                  onRetry: controller.retry,
+                  message: widget.controller.errorMessage,
+                  onRetry: widget.controller.retry,
                   onBack: Navigator.of(ctx).canPop()
                       ? () => Navigator.of(ctx).pop()
                       : null,
@@ -212,16 +280,16 @@ class _VideoCanvas extends StatelessWidget {
 
             // ── 4. Controls overlay ────────────────────────────────────────
             ListenableBuilder(
-              listenable: controller,
+              listenable: widget.controller,
               builder: (_, _) {
-                if (controller.hasError || controller.pipActive) {
+                if (widget.controller.hasError || widget.controller.pipActive) {
                   return const SizedBox.shrink();
                 }
                 return PlayerControlsOverlay(
-                  controller: controller,
-                  config: config,
-                  isFullscreen: isFullscreen,
-                  onToggleFullscreen: onToggleFullscreen,
+                  controller: widget.controller,
+                  config: widget.config,
+                  isFullscreen: widget.isFullscreen,
+                  onToggleFullscreen: widget.onToggleFullscreen,
                 );
               },
             ),
@@ -230,8 +298,9 @@ class _VideoCanvas extends StatelessWidget {
       ),
     );
 
-    if (config.aspectRatio != null) {
-      canvas = AspectRatio(aspectRatio: config.aspectRatio!, child: canvas);
+    if (widget.config.aspectRatio != null) {
+      canvas = AspectRatio(
+          aspectRatio: widget.config.aspectRatio!, child: canvas);
     }
 
     return canvas;
