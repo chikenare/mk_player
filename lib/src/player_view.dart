@@ -45,11 +45,16 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
   void initState() {
     super.initState();
     if (isDesktopPlatform) windowManager.addListener(this);
-    _initAutoOrientation();
+    _initMobileChrome();
   }
 
-  void _initAutoOrientation() {
+  void _initMobileChrome() {
     if (!isMobilePlatform) return;
+
+    // Immersive: hide the status & navigation bars while the player is shown.
+    // immersiveSticky lets the user swipe them back temporarily.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
     if (!_cfg.autoOrientation) return;
 
     final explicit = _cfg.fullscreenOrientations;
@@ -74,8 +79,12 @@ class _PlayerViewState extends State<PlayerView> with WindowListener {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerForOrientation);
-    if (isMobilePlatform && _cfg.autoOrientation) {
-      SystemChrome.setPreferredOrientations([]);
+    if (isMobilePlatform) {
+      // Restore the system bars and default orientation when leaving the player.
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      if (_cfg.autoOrientation) {
+        SystemChrome.setPreferredOrientations([]);
+      }
     }
     if (isDesktopPlatform) windowManager.removeListener(this);
     super.dispose();
