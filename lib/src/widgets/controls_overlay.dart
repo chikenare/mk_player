@@ -83,13 +83,14 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
   @override
   void initState() {
     super.initState();
+    // Start hidden: the player opens on a loading state, so the controls
+    // should stay out of the way until the user taps to reveal them.
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
-      value: 1.0,
+      value: 0.0,
     );
     _opacity = CurvedAnimation(parent: _anim, curve: Curves.easeInOut);
-    _scheduleHide();
   }
 
   // ── Visibility ─────────────────────────────────────────────────────────────
