@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
-import 'package:media_kit_video/media_kit_video.dart' show SubtitleViewConfiguration;
 
 import 'video_fit.dart';
 
@@ -32,10 +31,25 @@ class PlayerConfig {
   /// falls back to a generic arrow icon. Defaults to 10.
   final int seekSeconds;
 
-  // ── Buffering / network ───────────────────────────────────────────────────
+  // ── Buffering / network (ExoPlayer LoadControl) ───────────────────────────
 
-  /// Network buffer size in bytes fed to libmpv. Defaults to 32 MB.
-  final int bufferSize;
+  /// Minimum duration of media kept buffered at all times, in milliseconds.
+  /// ExoPlayer default: 25000.
+  final int minBufferMs;
+
+  /// Maximum duration of media the player will buffer, in milliseconds.
+  /// ExoPlayer default: 6553600.
+  final int maxBufferMs;
+
+  /// Duration of media that must be buffered **before playback starts** (or
+  /// resumes after a seek), in milliseconds. This is the main lever for fast
+  /// startup — ExoPlayer's default is 3000; we lower it to 500 so network
+  /// streams begin almost instantly.
+  final int bufferForPlaybackMs;
+
+  /// Duration of media that must be buffered to resume after a rebuffer (buffer
+  /// depletion), in milliseconds. ExoPlayer default: 6000.
+  final int bufferForPlaybackAfterRebufferMs;
 
   /// Seconds to wait while loading/buffering before showing a timeout error.
   /// Set to 0 to disable. Defaults to 30.
@@ -47,11 +61,6 @@ class PlayerConfig {
 
   /// Base delay between automatic retries (doubles each attempt, capped at 30s).
   final Duration autoRetryBaseDelay;
-
-  // ── Hardware acceleration ─────────────────────────────────────────────────
-
-  /// Enable platform GPU decoding. Disable if you encounter codec issues.
-  final bool enableHardwareAcceleration;
 
   // ── Wakelock ──────────────────────────────────────────────────────────────
 
@@ -115,13 +124,6 @@ class PlayerConfig {
   /// ```
   final List<DeviceOrientation>? fullscreenOrientations;
 
-  // ── Subtitles ─────────────────────────────────────────────────────────────
-
-  /// Styling for the rendered subtitle overlay (font, colour, background,
-  /// alignment, padding). Pass a custom [SubtitleViewConfiguration] to fully
-  /// control the look. `null` uses media_kit's default style.
-  final SubtitleViewConfiguration? subtitleViewConfiguration;
-
   // ── Host-app callbacks ────────────────────────────────────────────────────
 
   /// Called when playback reaches the end of the source.
@@ -139,11 +141,13 @@ class PlayerConfig {
     this.initialSpeed = 1.0,
     this.initialVolume = 1.0,
     this.seekSeconds = 10,
-    this.bufferSize = 32 * 1024 * 1024,
+    this.minBufferMs = 25000,
+    this.maxBufferMs = 6553600,
+    this.bufferForPlaybackMs = 500,
+    this.bufferForPlaybackAfterRebufferMs = 6000,
     this.loadingTimeoutSeconds = 30,
     this.autoRetryMaxAttempts = 3,
     this.autoRetryBaseDelay = const Duration(seconds: 2),
-    this.enableHardwareAcceleration = true,
     this.useWakelock = true,
     this.controlsTimeoutSeconds = 4,
     this.showBufferingIndicator = true,
@@ -155,7 +159,6 @@ class PlayerConfig {
     this.initialVideoFit = VideoFit.contain,
     this.autoOrientation = false,
     this.fullscreenOrientations,
-    this.subtitleViewConfiguration,
     this.onCompleted,
     this.onError,
     this.onPositionChanged,
@@ -167,11 +170,13 @@ class PlayerConfig {
     double? initialSpeed,
     double? initialVolume,
     int? seekSeconds,
-    int? bufferSize,
+    int? minBufferMs,
+    int? maxBufferMs,
+    int? bufferForPlaybackMs,
+    int? bufferForPlaybackAfterRebufferMs,
     int? loadingTimeoutSeconds,
     int? autoRetryMaxAttempts,
     Duration? autoRetryBaseDelay,
-    bool? enableHardwareAcceleration,
     bool? useWakelock,
     int? controlsTimeoutSeconds,
     bool? showBufferingIndicator,
@@ -183,7 +188,6 @@ class PlayerConfig {
     VideoFit? initialVideoFit,
     bool? autoOrientation,
     List<DeviceOrientation>? fullscreenOrientations,
-    SubtitleViewConfiguration? subtitleViewConfiguration,
     VoidCallback? onCompleted,
     void Function(String)? onError,
     void Function(Duration)? onPositionChanged,
@@ -194,12 +198,14 @@ class PlayerConfig {
       initialSpeed: initialSpeed ?? this.initialSpeed,
       initialVolume: initialVolume ?? this.initialVolume,
       seekSeconds: seekSeconds ?? this.seekSeconds,
-      bufferSize: bufferSize ?? this.bufferSize,
+      minBufferMs: minBufferMs ?? this.minBufferMs,
+      maxBufferMs: maxBufferMs ?? this.maxBufferMs,
+      bufferForPlaybackMs: bufferForPlaybackMs ?? this.bufferForPlaybackMs,
+      bufferForPlaybackAfterRebufferMs: bufferForPlaybackAfterRebufferMs ??
+          this.bufferForPlaybackAfterRebufferMs,
       loadingTimeoutSeconds: loadingTimeoutSeconds ?? this.loadingTimeoutSeconds,
       autoRetryMaxAttempts: autoRetryMaxAttempts ?? this.autoRetryMaxAttempts,
       autoRetryBaseDelay: autoRetryBaseDelay ?? this.autoRetryBaseDelay,
-      enableHardwareAcceleration:
-          enableHardwareAcceleration ?? this.enableHardwareAcceleration,
       useWakelock: useWakelock ?? this.useWakelock,
       controlsTimeoutSeconds:
           controlsTimeoutSeconds ?? this.controlsTimeoutSeconds,
@@ -214,8 +220,6 @@ class PlayerConfig {
       autoOrientation: autoOrientation ?? this.autoOrientation,
       fullscreenOrientations:
           fullscreenOrientations ?? this.fullscreenOrientations,
-      subtitleViewConfiguration:
-          subtitleViewConfiguration ?? this.subtitleViewConfiguration,
       onCompleted: onCompleted ?? this.onCompleted,
       onError: onError ?? this.onError,
       onPositionChanged: onPositionChanged ?? this.onPositionChanged,

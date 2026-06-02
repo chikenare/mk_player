@@ -81,9 +81,6 @@ class PlayerSource {
   bool get isLocal => path != null;
   bool get isNetwork => url != null;
 
-  /// Resolved URI string passed to `media_kit`.
-  String get uri => isLocal ? 'file://$path' : url!;
-
   @override
   String toString() => 'PlayerSource(${isLocal ? path : url})';
 }

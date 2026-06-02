@@ -1,23 +1,20 @@
 name: mk_player
 description: >
-  A highly reusable, self-contained Flutter video player package built on the
-  media_kit ecosystem. Supports HLS, DASH, local files, HTTP headers, track
-  management, wakelock, and a premium streaming UI.
+  A highly reusable, self-contained Flutter video player built on
+  better_player_plus (ExoPlayer on Android). Supports HLS, DASH, local files,
+  HTTP headers, track management, wakelock, and a premium streaming UI.
 version: 1.0.0
 homepage: https://github.com/yourorg/mk_player
 
 environment:
   sdk: ^3.11.5
-  flutter: ">=3.16.0"
+  flutter: ">=3.41.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  media_kit: ^1.2.6
-  media_kit_video: ^2.0.1
-  media_kit_libs_video: ^1.0.7
+  better_player_plus: 1.2.1
   wakelock_plus: ^1.2.10
-  window_manager: ^0.3.9
 
 dev_dependencies:
   flutter_test:

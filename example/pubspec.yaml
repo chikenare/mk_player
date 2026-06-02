@@ -10,10 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  media_kit: ^1.2.6           # required for MediaKit.ensureInitialized()
   mk_player:
     path: ../
-  window_manager: ^0.3.9
 
 dev_dependencies:
   flutter_test:

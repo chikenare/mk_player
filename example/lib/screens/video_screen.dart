@@ -114,7 +114,7 @@ class _DebugBanner extends StatelessWidget {
                   'state: ${controller.state.name}  '
                   'pos: ${controller.position.inSeconds}s  '
                   'audio: ${controller.audioTracks.length}  '
-                  'sub: ${controller.subtitleTracks.length}  '
+                  'sub: ${controller.subtitleSources.length}  '
                   'video: ${controller.videoTracks.length}',
                   style: const TextStyle(
                     color: Colors.white70,

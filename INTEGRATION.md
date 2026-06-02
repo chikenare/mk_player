@@ -26,6 +26,8 @@ flutter pub get
 
 ## 2. Platform setup
 
+> `mk_player` supports **Android only**.
+
 ### Android
 
 `android/app/build.gradle` — set the minimum SDK to **21**:
@@ -38,34 +40,27 @@ android {
 }
 ```
 
-### iOS
+For network streams over HTTP (non-HTTPS), allow cleartext traffic in
+`android/app/src/main/AndroidManifest.xml`:
 
-`ios/Podfile` — set the platform to **12.0** or higher:
-
-```ruby
-platform :ios, '12.0'
+```xml
+<application
+    android:usesCleartextTraffic="true"
+    ...>
 ```
-
-No further `Info.plist` entries are needed for basic playback. For network streams over HTTP (non-HTTPS), add an App Transport Security exception.
-
-### Desktop (macOS / Windows / Linux)
-
-No extra steps are required — `media_kit_libs_video` ships the native FFmpeg
-libraries for all desktop targets.
 
 ---
 
-## 3. Initialise media_kit in `main.dart`
+## 3. Initialise `main.dart`
 
-`media_kit` requires a one-time native initialisation call **before** `runApp`:
+No special player initialisation is required — just the standard Flutter binding
+call **before** `runApp`:
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();   // ← required
   runApp(const MyApp());
 }
 ```
@@ -161,16 +156,24 @@ await _controller.openPlaylist([
 
 ## 7. Track management
 
+Tracks use `better_player_plus` types, re-exported from `mk_player`
+(`BetterPlayerAsmsAudioTrack`, `BetterPlayerAsmsTrack`,
+`BetterPlayerSubtitlesSource`).
+
 ```dart
 // After the source is open, read available tracks:
-final audioTracks    = _controller.audioTracks;
-final subtitleTracks = _controller.subtitleTracks;
+final audioTracks      = _controller.audioTracks;     // List<BetterPlayerAsmsAudioTrack>
+final videoTracks      = _controller.videoTracks;     // List<BetterPlayerAsmsTrack>
+final subtitleSources  = _controller.subtitleSources; // List<BetterPlayerSubtitlesSource>
 
 // Switch audio language:
-await _controller.setAudioTrack(audioTracks[1]);
+_controller.setAudioTrack(audioTracks[1]);
+
+// Force a video quality:
+_controller.setVideoTrack(videoTracks[2]);
 
 // Enable subtitles:
-await _controller.setSubtitleTrack(subtitleTracks.first);
+await _controller.setSubtitle(subtitleSources.first);
 
 // Disable subtitles:
 await _controller.disableSubtitles();
@@ -246,8 +249,10 @@ PlayerView(
 | `loop`                          | `false`          | Loop at completion                                 |
 | `initialSpeed`                  | `1.0`            | Playback speed (0.25–4.0)                         |
 | `initialVolume`                 | `1.0`            | Volume (0.0–1.0)                                   |
-| `bufferSize`                    | 32 MB            | Native network buffer in bytes                    |
-| `enableHardwareAcceleration`    | `true`           | Platform GPU decoding                              |
+| `minBufferMs`                   | `25000`          | Min media (ms) kept buffered (ExoPlayer LoadControl) |
+| `maxBufferMs`                   | `6553600`        | Max media (ms) buffered                            |
+| `bufferForPlaybackMs`           | `500`            | Media (ms) buffered before playback starts (fast start) |
+| `bufferForPlaybackAfterRebufferMs` | `6000`        | Media (ms) buffered to resume after a rebuffer    |
 | `useWakelock`                   | `true`           | Keep screen on during playback                    |
 | `controlsTimeoutSeconds`        | `4`              | Seconds before controls auto-hide                 |
 | `showBufferingIndicator`        | `true`           | Show spinner while buffering                      |

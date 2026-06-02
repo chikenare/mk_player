@@ -1,6 +1,8 @@
 # mk_player
 
-A self-contained, highly reusable Flutter video player built on the [media_kit](https://pub.dev/packages/media_kit) ecosystem. Drop it into any app and get a premium streaming experience with zero boilerplate.
+A self-contained, highly reusable Flutter video player built on [better_player_plus](https://pub.dev/packages/better_player_plus) (ExoPlayer on Android). Drop it into any app and get a premium streaming experience with zero boilerplate.
+
+> **Platform support:** Android only.
 
 ---
 
@@ -13,7 +15,7 @@ A self-contained, highly reusable Flutter video player built on the [media_kit](
 | **Tracks** | Dynamic audio, subtitle and video-quality switching |
 | **Controls** | Play/pause, seek, volume, mute, speed (0.25×–4×), double-tap ±10 s |
 | **Thumbnails** | WebVTT storyboard scrubber preview with sprite sheet support |
-| **Fullscreen** | Native macOS/Windows/Linux window expansion + mobile SystemChrome |
+| **Fullscreen** | Landscape orientation lock + immersive SystemChrome |
 | **Wakelock** | Screen stays on during playback, released on pause/error/dispose |
 | **Error UI** | User-friendly overlay with Retry button and automatic 30 s timeout |
 | **PiP hooks** | Architecture hooks for iOS & Android Picture-in-Picture |
@@ -26,10 +28,7 @@ A self-contained, highly reusable Flutter video player built on the [media_kit](
 | Platform | Minimum version |
 |---|---|
 | Android | SDK 21 |
-| iOS | 12.0 |
-| macOS | 10.15 |
-| Windows | Windows 10 |
-| Flutter | 3.16 |
+| Flutter | 3.41 |
 | Dart | 3.11 |
 
 ---
@@ -67,46 +66,27 @@ android {
 }
 ```
 
-#### iOS — `ios/Podfile`
-```ruby
-platform :ios, '12.0'
-```
+For HTTP (non-HTTPS) streams, allow cleartext traffic in
+`android/app/src/main/AndroidManifest.xml`:
 
-#### macOS — `macos/Podfile`
-```ruby
-platform :osx, '10.15'
+```xml
+<application
+    android:usesCleartextTraffic="true"
+    ...>
 ```
-
-No additional `Info.plist` or `AppDelegate` changes are required.
-For HTTP (non-HTTPS) streams on iOS/macOS, add an App Transport Security exception.
 
 ---
 
 ## Initialisation
 
-Call both initialisers **before** `runApp`. On desktop, `window_manager` must be
-initialised so fullscreen works.
+No special player initialisation is required — just the standard Flutter binding
+call before `runApp`:
 
 ```dart
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:window_manager/window_manager.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Required by media_kit on all platforms.
-  MediaKit.ensureInitialized();
-
-  // Required by window_manager on desktop for native fullscreen.
-  if (!kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.macOS ||
-          defaultTargetPlatform == TargetPlatform.windows ||
-          defaultTargetPlatform == TargetPlatform.linux)) {
-    await windowManager.ensureInitialized();
-  }
-
   runApp(const MyApp());
 }
 ```
@@ -190,7 +170,7 @@ PlayerSource.network(
   // asset path ('assets/…'), or absolute file path.
   posterUrl: 'https://cdn.example.com/poster.jpg',
 
-  // HTTP headers forwarded to the native libmpv layer.
+  // HTTP headers forwarded to the native ExoPlayer layer.
   // Works for HLS segment requests, DASH manifests, and progressive downloads.
   headers: {
     'Authorization': 'Bearer $accessToken',
@@ -242,12 +222,16 @@ CustomPlayerController(
     initialVolume: 1.0,      // 0.0 – 1.0
     seekSeconds: 10,         // double-tap / skip-button amount
 
+    // ── Buffering (ExoPlayer LoadControl, milliseconds)
+    minBufferMs: 25000,                 // min media kept buffered
+    maxBufferMs: 6553600,               // max media buffered
+    bufferForPlaybackMs: 500,           // buffer before playback starts (fast start)
+    bufferForPlaybackAfterRebufferMs: 6000, // buffer to resume after a rebuffer
+
     // ── Network
-    bufferSize: 32 * 1024 * 1024,       // 32 MB (bytes fed to libmpv)
     loadingTimeoutSeconds: 30,          // 0 = no timeout
     autoRetryMaxAttempts: 3,            // auto-retry on error; 0 = off
     autoRetryBaseDelay: Duration(seconds: 2), // exponential backoff base
-    enableHardwareAcceleration: true,   // GPU decoding
 
     // ── Screen
     useWakelock: true,              // keep screen on while playing
@@ -260,12 +244,6 @@ CustomPlayerController(
     showBufferingIndicator: true,
     showTitle: true,                     // title in the top bar
     showLockButton: true,                // lock-screen button (top-right)
-
-    // ── Subtitles styling (pass a custom config)
-    subtitleViewConfiguration: SubtitleViewConfiguration(
-      style: TextStyle(fontSize: 32, color: Colors.white),
-      padding: EdgeInsets.all(24),
-    ),
 
     // ── Callbacks
     onCompleted: () => _playNext(),
@@ -284,21 +262,22 @@ CustomPlayerController(
 | `initialSpeed` | `1.0` | Playback rate, clamped to \[0.25, 4.0\] |
 | `initialVolume` | `1.0` | Volume \[0.0, 1.0\] |
 | `seekSeconds` | `10` | Double-tap / skip-button seek amount (5, 10, 30 use matching icons) |
-| `bufferSize` | 32 MB | Native buffer size in bytes |
+| `minBufferMs` | `25000` | Min duration (ms) of media kept buffered (ExoPlayer LoadControl) |
+| `maxBufferMs` | `6553600` | Max duration (ms) of media buffered |
+| `bufferForPlaybackMs` | `500` | Media (ms) buffered before playback starts — main lever for fast startup |
+| `bufferForPlaybackAfterRebufferMs` | `6000` | Media (ms) buffered to resume after a rebuffer |
 | `loadingTimeoutSeconds` | `30` | Seconds before a stuck load shows a timeout error; `0` disables |
 | `autoRetryMaxAttempts` | `3` | Automatic retries (exponential backoff) before showing the error overlay; `0` disables |
 | `autoRetryBaseDelay` | `2s` | Base delay between retries (doubles each attempt, capped at 30s) |
-| `enableHardwareAcceleration` | `true` | GPU-accelerated decoding |
 | `useWakelock` | `true` | Prevents screen sleep during playback |
 | `aspectRatio` | `null` | Forces canvas ratio; `null` = stream native |
 | `initialVideoFit` | `VideoFit.contain` | Initial scaling: `contain` / `cover` / `fill` |
-| `subtitleViewConfiguration` | `null` | Custom subtitle styling (font, colour, background, padding) |
 | `accentColor` | `Color(0xFFE50914)` | Accent colour for UI elements |
 | `controlsTimeoutSeconds` | `4` | Seconds of inactivity before auto-hide |
 | `showBufferingIndicator` | `true` | Show spinner while buffering |
 | `showTitle` | `true` | Show the source title in the top bar |
 | `showLockButton` | `true` | Show the lock-screen button (top-right) |
-| `showVolumeControl` | `null` | Inline volume control; `null` = auto (desktop/web only), or force `true`/`false` |
+| `showVolumeControl` | `null` | Inline volume control; `null` = auto (hidden on mobile, where the OS volume keys are used), or force `true`/`false` |
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
 | `onPositionChanged` | `null` | Throttled (~1/sec) position callback — ideal for resume tracking |
@@ -328,7 +307,7 @@ controller.volume        // double 0.0–1.0 (accounts for mute)
 controller.rawVolume     // double without mute flag
 controller.muted         // bool
 controller.speed         // double
-controller.errorMessage  // String? — last error from libmpv
+controller.errorMessage  // String? — last error from ExoPlayer
 controller.currentTitle  // String? — title from PlayerSource
 controller.storyboard    // Storyboard? — loaded VTT, null if none
 ```
@@ -357,24 +336,33 @@ await controller.retry();          // re-open last source after an error
 
 ### Track management
 
-Available tracks populate after the source opens:
+Tracks are parsed from the HLS/DASH manifest after the source opens and use
+`better_player_plus` types (re-exported from `mk_player`):
 
 ```dart
-final audios    = controller.audioTracks;    // List<AudioTrack>
-final subtitles = controller.subtitleTracks; // List<SubtitleTrack>
-final videos    = controller.videoTracks;    // List<VideoTrack>
+final audios    = controller.audioTracks;     // List<BetterPlayerAsmsAudioTrack>
+final videos    = controller.videoTracks;     // List<BetterPlayerAsmsTrack>
+final subtitles = controller.subtitleSources; // List<BetterPlayerSubtitlesSource>
 
-// Switch language
-await controller.setAudioTrack(audios[1]);
+// Currently-selected tracks (nullable)
+controller.selectedAudioTrack; // BetterPlayerAsmsAudioTrack?
+controller.selectedVideoTrack; // BetterPlayerAsmsTrack?
+controller.selectedSubtitle;   // BetterPlayerSubtitlesSource?
+
+// Whether any real (non-"off") subtitle exists
+controller.hasSubtitles; // bool
+
+// Switch audio language
+controller.setAudioTrack(audios[1]);
 
 // Enable subtitles
-await controller.setSubtitleTrack(subtitles.first);
+await controller.setSubtitle(subtitles.first);
 
 // Turn off subtitles
 await controller.disableSubtitles();
 
 // Force a video quality / bitrate
-await controller.setVideoTrack(videos[2]);
+controller.setVideoTrack(videos[2]);
 ```
 
 ### Listening to changes
@@ -458,12 +446,11 @@ A premium, streaming-app-style control layer (inspired by Netflix / Apple TV+):
 | Double-tap right `> 60%` | Forward `seekSeconds` |
 | Drag progress bar | Seek with thumbnail preview |
 | Tap time label | Toggle total ↔ remaining time |
-| Pinch in / out (mobile) | Switch aspect ratio (fit ↔ zoom) |
-| ⤢ Aspect-ratio button (desktop/web) | Cycle contain → cover → fill |
+| Pinch in / out | Switch aspect ratio (fit ↔ zoom) |
 | **Speed / Audio / Subtitles** | Open a focused bottom sheet for that setting |
 | 🔒 Lock | Lock the screen — disables all gestures until you tap to unlock |
-| Volume icon | Mute toggle + inline slider with live `%` (desktop/web by default) |
-| ⛶ Fullscreen | Native window expand (desktop) or landscape lock (mobile) |
+| Volume icon | Mute toggle + inline slider with live `%` (when enabled via `showVolumeControl`) |
+| ⛶ Fullscreen | Landscape orientation lock + immersive system UI |
 
 For sources opened with `isLive: true`, a red **LIVE** badge replaces the
 duration and the scrubber is disabled. Liveness is never auto-detected — set
@@ -550,26 +537,19 @@ externalSubtitles: ExternalSubtitle.fromMap({
 }),
 ```
 
-> The sentinel `auto` / `no` tracks that the engine reports internally are
-> filtered out — `controller.audioTracks` and `controller.subtitleTracks`
-> return only real, selectable tracks.
+> The subtitle list includes an "off" entry; `controller.hasSubtitles` reports
+> whether there is at least one real, selectable subtitle to choose from.
 
 ---
 
 ## Fullscreen
 
-Fullscreen is handled automatically by `PlayerView`. Tapping the ⛶ icon:
-
-- **macOS / Windows / Linux** — calls `windowManager.setFullScreen(true)`,
-  expanding the OS window to cover the entire display.
-- **iOS / Android** — locks orientation to landscape, hides system UI, and
-  pushes a covering route over the root navigator.
+Fullscreen is handled automatically by `PlayerView`. Tapping the ⛶ icon locks
+orientation to landscape, hides system UI (immersive mode), and pushes a
+covering route over the root navigator.
 
 Exiting (via the exit button or the system back gesture) restores the previous
-state on all platforms.
-
-> **Requirement (desktop):** call `windowManager.ensureInitialized()` in
-> `main()` before `runApp` — see [Initialisation](#initialisation).
+orientation and system UI.
 
 ---
 
@@ -649,23 +629,11 @@ ListenableBuilder(
 ## Complete example
 
 ```dart
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:mk_player/mk_player.dart';
-import 'package:window_manager/window_manager.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
-
-  if (!kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.macOS ||
-          defaultTargetPlatform == TargetPlatform.windows ||
-          defaultTargetPlatform == TargetPlatform.linux)) {
-    await windowManager.ensureInitialized();
-  }
-
   runApp(const App());
 }
 
@@ -758,11 +726,8 @@ lib/
 
 | Package | Purpose |
 |---|---|
-| `media_kit` | Core player engine (libmpv) |
-| `media_kit_video` | Video surface rendering |
-| `media_kit_libs_video` | Native FFmpeg/libmpv binaries |
+| `better_player_plus` (1.2.1) | Core player engine (ExoPlayer on Android) |
 | `wakelock_plus` | Screen sleep prevention |
-| `window_manager` | Native window fullscreen on desktop |
 
 ---
 

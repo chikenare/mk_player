@@ -1,11 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:better_player_plus/better_player_plus.dart';
+import 'package:flutter/widgets.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import 'models/external_subtitle.dart';
 import 'models/player_config.dart';
 import 'models/player_source.dart';
 import 'models/storyboard.dart';
@@ -25,6 +23,12 @@ enum MkPlayerState {
   error,
 }
 
+BoxFit _boxFitOf(VideoFit fit) => switch (fit) {
+      VideoFit.contain => BoxFit.contain,
+      VideoFit.cover => BoxFit.cover,
+      VideoFit.fill => BoxFit.fill,
+    };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Controller
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,13 +37,13 @@ enum MkPlayerState {
 ///
 /// Create one instance per screen/route, pass it to [PlayerView], and dispose
 /// it when the widget leaves the tree (e.g. in [State.dispose]).
+///
+/// Backed by `better_player_plus` (ExoPlayer on Android).
 class CustomPlayerController extends ChangeNotifier {
-  // ── media_kit core ─────────────────────────────────────────────────────────
+  // ── better_player core ───────────────────────────────────────────────────
 
-  late final Player _player;
-
-  /// The [VideoController] bound to the [Video] widget inside [PlayerView].
-  late final VideoController videoController;
+  /// The underlying controller bound to the [BetterPlayer] widget in [PlayerView].
+  late final BetterPlayerController betterPlayerController;
 
   // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -56,14 +60,6 @@ class CustomPlayerController extends ChangeNotifier {
   double _speed;
   String? _errorMessage;
 
-  List<AudioTrack> _audioTracks = [];
-  List<SubtitleTrack> _subtitleTracks = [];
-  List<VideoTrack> _videoTracks = [];
-  List<ExternalSubtitle> _externalSubtitles = const [];
-  AudioTrack? _selectedAudioTrack;
-  SubtitleTrack? _selectedSubtitleTrack;
-  VideoTrack? _selectedVideoTrack;
-
   // ── Storyboard & metadata ──────────────────────────────────────────────────
 
   Storyboard? _storyboard;
@@ -78,20 +74,14 @@ class CustomPlayerController extends ChangeNotifier {
 
   // ── Video orientation ──────────────────────────────────────────────────────
 
-  // True when the video's display aspect ratio is portrait (height > width).
-  // Updated whenever the player emits new videoParams (e.g. after the first
-  // decoded frame). Used by PlayerView to pick fullscreen orientations.
   bool _isPortraitVideo = false;
   bool get isPortraitVideo => _isPortraitVideo;
 
-  // True once the first valid videoParams have been received (aspect > 0).
-  // Used by PlayerView to know when auto-orientation can be safely applied.
   bool _videoParamsReceived = false;
   bool get videoParamsReceived => _videoParamsReceived;
 
   // ── Live ───────────────────────────────────────────────────────────────────
 
-  // Set explicitly from PlayerSource.isLive — never auto-detected.
   bool _isLive = false;
   bool get isLive => _isLive;
 
@@ -110,6 +100,7 @@ class CustomPlayerController extends ChangeNotifier {
   void setVideoFit(VideoFit fit) {
     if (_disposed || _videoFit == fit) return;
     _videoFit = fit;
+    betterPlayerController.setOverriddenFit(_boxFitOf(fit));
     _notify();
   }
 
@@ -123,13 +114,13 @@ class CustomPlayerController extends ChangeNotifier {
 
   // ── Internal ───────────────────────────────────────────────────────────────
 
-  final List<StreamSubscription<dynamic>> _subs = [];
   bool _disposed = false;
   PlayerSource? _lastSource;
   Timer? _loadingTimeout;
 
-  // startAt: consumed on first playing event
+  // startAt: consumed once playback is initialised
   Duration? _pendingStartAt;
+  bool _startAtApplied = false;
 
   // onPositionChanged throttle
   DateTime? _lastPositionCallback;
@@ -157,29 +148,35 @@ class CustomPlayerController extends ChangeNotifier {
   Duration get remaining =>
       _duration > _position ? _duration - _position : Duration.zero;
 
-  double get progress =>
-      _duration.inMilliseconds > 0
-          ? (_position.inMilliseconds / _duration.inMilliseconds)
-              .clamp(0.0, 1.0)
-          : 0.0;
+  double get progress => _duration.inMilliseconds > 0
+      ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+      : 0.0;
 
-  // Sentinel tracks ('auto'/'no') that media_kit always includes are filtered
-  // out so consumers only see real, selectable tracks.
-  List<AudioTrack> get audioTracks =>
-      _audioTracks.where(_isRealTrackId).toList();
-  List<SubtitleTrack> get subtitleTracks =>
-      _subtitleTracks.where(_isRealTrackId).toList();
-  List<VideoTrack> get videoTracks =>
-      _videoTracks.where(_isRealTrackId).toList();
-  AudioTrack? get selectedAudioTrack => _selectedAudioTrack;
-  SubtitleTrack? get selectedSubtitleTrack => _selectedSubtitleTrack;
-  VideoTrack? get selectedVideoTrack => _selectedVideoTrack;
+  // ── Tracks (HLS/DASH ASMS) ───────────────────────────────────────────────────
 
-  /// External subtitles supplied via [PlayerSource.externalSubtitles].
-  List<ExternalSubtitle> get externalSubtitles =>
-      List.unmodifiable(_externalSubtitles);
+  /// Selectable audio tracks parsed from the HLS/DASH manifest.
+  List<BetterPlayerAsmsAudioTrack> get audioTracks =>
+      betterPlayerController.betterPlayerAsmsAudioTracks ?? const [];
+  BetterPlayerAsmsAudioTrack? get selectedAudioTrack =>
+      betterPlayerController.betterPlayerAsmsAudioTrack;
 
-  static bool _isRealTrackId(dynamic t) => t.id != 'auto' && t.id != 'no';
+  /// Selectable video-quality tracks parsed from the HLS/DASH manifest.
+  List<BetterPlayerAsmsTrack> get videoTracks =>
+      betterPlayerController.betterPlayerAsmsTracks;
+  BetterPlayerAsmsTrack? get selectedVideoTrack =>
+      betterPlayerController.betterPlayerAsmsTrack;
+
+  /// Subtitle sources: embedded (HLS/DASH), external (supplied via
+  /// [PlayerSource.externalSubtitles]) and an "off" entry — all unified by
+  /// better_player into a single list.
+  List<BetterPlayerSubtitlesSource> get subtitleSources =>
+      betterPlayerController.betterPlayerSubtitlesSourceList;
+  BetterPlayerSubtitlesSource? get selectedSubtitle =>
+      betterPlayerController.betterPlayerSubtitlesSource;
+
+  /// Whether there is at least one real (non-"off") subtitle to choose from.
+  bool get hasSubtitles => subtitleSources
+      .any((s) => s.type != BetterPlayerSubtitlesSourceType.none);
 
   // ── PiP ────────────────────────────────────────────────────────────────────
 
@@ -206,82 +203,81 @@ class CustomPlayerController extends ChangeNotifier {
   }
 
   void _initPlayer() {
-    _player = Player(
-      configuration: PlayerConfiguration(
-        bufferSize: config.bufferSize,
-        logLevel: MPVLogLevel.warn,
+    betterPlayerController = BetterPlayerController(
+      BetterPlayerConfiguration(
+        autoPlay: config.autoPlay,
+        looping: config.loop,
+        fit: _boxFitOf(config.initialVideoFit),
+        // We render our own controls overlay and manage fullscreen ourselves.
+        controlsConfiguration:
+            const BetterPlayerControlsConfiguration(showControls: false),
+        handleLifecycle: false,
+        autoDispose: false,
+        expandToFill: true,
       ),
     );
-    videoController = VideoController(
-      _player,
-      configuration: VideoControllerConfiguration(
-        enableHardwareAcceleration: config.enableHardwareAcceleration,
-      ),
-    );
-    _player.setVolume(_volume * 100);
-    _player.setRate(_speed);
-    _attachListeners();
-  }
-
-  void _attachListeners() {
-    _subs.addAll([
-      _player.stream.playing.listen(_handlePlaying),
-      _player.stream.buffering.listen(_handleBuffering),
-      _player.stream.position.listen(_handlePosition),
-      _player.stream.duration.listen(_handleDuration),
-      _player.stream.buffer.listen(_handleBuffer),
-      _player.stream.volume.listen(_handleVolume),
-      _player.stream.rate.listen(_handleRate),
-      _player.stream.tracks.listen(_handleTracks),
-      _player.stream.track.listen(_handleTrack),
-      _player.stream.completed.listen(_handleCompleted),
-      _player.stream.error.listen(_handleError),
-      _player.stream.videoParams.listen(_handleVideoParams),
-    ]);
+    betterPlayerController.addEventsListener(_onEvent);
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
   Future<void> open(PlayerSource source) async {
     if (_disposed) return;
-    // New, explicit open → reset the auto-retry counter.
     _retryAttempt = 0;
     _retryTimer?.cancel();
     await _load(source);
   }
 
-  // Core load routine, shared by open() and auto-retry. Does NOT reset the
-  // retry counter, so backoff persists across attempts.
   Future<void> _load(PlayerSource source) async {
     if (_disposed) return;
     _beginSource(source);
     try {
-      final media = Media(source.uri, httpHeaders: source.headers);
-      await _player.open(media, play: config.autoPlay);
+      await betterPlayerController.setupDataSource(_buildDataSource(source));
     } catch (e, st) {
-      debugPrint('[MkPlayer] open() error: $e\n$st');
+      debugPrint('[MkPlayer] setupDataSource error: $e\n$st');
       _onError('Unable to open source: $e');
     }
   }
 
+  /// Opening a playlist is not supported by the better_player backend in this
+  /// package; the first source is played. Kept for API compatibility.
   Future<void> openPlaylist(List<PlayerSource> sources) async {
     if (_disposed || sources.isEmpty) return;
-    _retryAttempt = 0;
-    _retryTimer?.cancel();
-    _beginSource(sources.first);
-    try {
-      final playlist = Playlist(
-        sources.map((s) => Media(s.uri, httpHeaders: s.headers)).toList(),
-      );
-      await _player.open(playlist, play: config.autoPlay);
-    } catch (e, st) {
-      debugPrint('[MkPlayer] openPlaylist() error: $e\n$st');
-      _onError('Unable to open playlist: $e');
-    }
+    await open(sources.first);
   }
 
-  // Resets per-source state and enters the loading phase. Shared by single and
-  // playlist loads. Storyboard fetch is kicked off in the background.
+  BetterPlayerDataSource _buildDataSource(PlayerSource source) {
+    final subtitles = source.externalSubtitles
+        .map(
+          (s) => BetterPlayerSubtitlesSource(
+            type: BetterPlayerSubtitlesSourceType.network,
+            name: s.title ?? s.language?.toUpperCase() ?? 'Subtitle',
+            urls: [s.uri],
+          ),
+        )
+        .toList();
+
+    final buffering = BetterPlayerBufferingConfiguration(
+      minBufferMs: config.minBufferMs,
+      maxBufferMs: config.maxBufferMs,
+      bufferForPlaybackMs: config.bufferForPlaybackMs,
+      bufferForPlaybackAfterRebufferMs: config.bufferForPlaybackAfterRebufferMs,
+    );
+
+    return BetterPlayerDataSource(
+      source.isLocal
+          ? BetterPlayerDataSourceType.file
+          : BetterPlayerDataSourceType.network,
+      source.isLocal ? source.path! : source.url!,
+      headers: source.headers.isEmpty ? null : source.headers,
+      subtitles: subtitles.isEmpty ? null : subtitles,
+      liveStream: source.isLive,
+      bufferingConfiguration: buffering,
+    );
+  }
+
+  // Resets per-source state and enters the loading phase. Storyboard fetch is
+  // kicked off in the background.
   void _beginSource(PlayerSource source) {
     _lastSource = source;
     _currentTitle = source.title;
@@ -289,7 +285,7 @@ class CustomPlayerController extends ChangeNotifier {
     _isLive = source.isLive;
     _videoParamsReceived = false;
     _pendingStartAt = source.startAt;
-    _externalSubtitles = source.externalSubtitles;
+    _startAtApplied = false;
     _currentPosterUrl = source.posterUrl;
     _posterVisible = _currentPosterUrl != null;
 
@@ -304,23 +300,27 @@ class CustomPlayerController extends ChangeNotifier {
 
   Future<void> play() async {
     if (_disposed) return;
-    await _player.play();
+    await betterPlayerController.play();
   }
 
   Future<void> pause() async {
     if (_disposed) return;
-    await _player.pause();
+    await betterPlayerController.pause();
   }
 
   Future<void> togglePlayPause() async {
     if (_disposed) return;
-    await _player.playOrPause();
+    if (betterPlayerController.isPlaying() ?? false) {
+      await betterPlayerController.pause();
+    } else {
+      await betterPlayerController.play();
+    }
   }
 
   /// Seeks to [position], clamped to the valid `[0, duration]` range.
   Future<void> seek(Duration position) async {
     if (_disposed) return;
-    await _player.seek(_clampPosition(position));
+    await betterPlayerController.seekTo(_clampPosition(position));
   }
 
   Duration _clampPosition(Duration p) {
@@ -332,72 +332,57 @@ class CustomPlayerController extends ChangeNotifier {
   Future<void> setVolume(double value) async {
     if (_disposed) return;
     _volume = value.clamp(0.0, 1.0);
-    if (!_muted) await _player.setVolume(_volume * 100);
+    if (!_muted) await betterPlayerController.setVolume(_volume);
     _notify();
   }
 
   Future<void> toggleMute() async {
     if (_disposed) return;
     _muted = !_muted;
-    await _player.setVolume(_muted ? 0 : _volume * 100);
+    await betterPlayerController.setVolume(_muted ? 0 : _volume);
     _notify();
   }
 
   Future<void> setSpeed(double value) async {
     if (_disposed) return;
     _speed = value.clamp(0.25, 4.0);
-    await _player.setRate(_speed);
+    await betterPlayerController.setSpeed(_speed);
     _notify();
   }
 
-  Future<void> setAudioTrack(AudioTrack track) async {
+  // ── Track selection ──────────────────────────────────────────────────────
+
+  void setAudioTrack(BetterPlayerAsmsAudioTrack track) {
     if (_disposed) return;
-    await _player.setAudioTrack(track);
-    _selectedAudioTrack = track;
+    betterPlayerController.setAudioTrack(track);
     _notify();
   }
 
-  Future<void> setSubtitleTrack(SubtitleTrack track) async {
+  void setVideoTrack(BetterPlayerAsmsTrack track) {
     if (_disposed) return;
-    await _player.setSubtitleTrack(track);
-    _selectedSubtitleTrack = track;
+    betterPlayerController.setTrack(track);
     _notify();
   }
 
+  Future<void> setSubtitle(BetterPlayerSubtitlesSource source) async {
+    if (_disposed) return;
+    await betterPlayerController.setupSubtitleSource(source);
+    _notify();
+  }
+
+  /// Disables subtitles by selecting the "off" source, if present.
   Future<void> disableSubtitles() async {
     if (_disposed) return;
-    await _player.setSubtitleTrack(SubtitleTrack.no());
-    _selectedSubtitleTrack = SubtitleTrack.no();
-    _notify();
-  }
-
-  /// Loads and displays an external subtitle from [PlayerSource.externalSubtitles].
-  Future<void> setExternalSubtitle(ExternalSubtitle sub) async {
-    if (_disposed) return;
-    final track = SubtitleTrack.uri(
-      sub.uri,
-      title: sub.title,
-      language: sub.language,
+    final off = subtitleSources.firstWhere(
+      (s) => s.type == BetterPlayerSubtitlesSourceType.none,
+      orElse: () => BetterPlayerSubtitlesSource(
+        type: BetterPlayerSubtitlesSourceType.none,
+      ),
     );
-    await _player.setSubtitleTrack(track);
-    _selectedSubtitleTrack = track;
-    _notify();
-  }
-
-  /// Whether [sub] is the currently active subtitle track.
-  bool isExternalSubtitleSelected(ExternalSubtitle sub) =>
-      (_selectedSubtitleTrack?.uri ?? false) &&
-      _selectedSubtitleTrack?.id == sub.uri;
-
-  Future<void> setVideoTrack(VideoTrack track) async {
-    if (_disposed) return;
-    await _player.setVideoTrack(track);
-    _selectedVideoTrack = track;
-    _notify();
+    await setSubtitle(off);
   }
 
   /// Manually retries the last source (e.g. from the error overlay button).
-  /// Resets the auto-retry counter.
   Future<void> retry() async {
     if (_disposed || _lastSource == null) return;
     _retryAttempt = 0;
@@ -409,7 +394,9 @@ class CustomPlayerController extends ChangeNotifier {
   // ── startAt ────────────────────────────────────────────────────────────────
 
   void _applyStartAt() {
+    if (_startAtApplied) return;
     final t = _pendingStartAt;
+    _startAtApplied = true;
     _pendingStartAt = null;
     if (t == null || t <= Duration.zero) return;
     seek(t); // seek() clamps to the valid range
@@ -443,48 +430,86 @@ class CustomPlayerController extends ChangeNotifier {
     );
   }
 
-  // ── Stream handlers ────────────────────────────────────────────────────────
+  // ── Event handling ───────────────────────────────────────────────────────
 
-  void _handlePlaying(bool playing) {
+  void _onEvent(BetterPlayerEvent event) {
     if (_disposed) return;
-    if (playing) {
-      _loadingTimeout?.cancel();
-      _retryAttempt = 0; // successful playback clears the retry counter
-      _applyStartAt(); // seek to startAt before first UI notification
-      _transition(MkPlayerState.playing);
-      _setWakelock(true);
-    } else {
-      if (_state == MkPlayerState.playing ||
-          _state == MkPlayerState.buffering) {
-        _transition(MkPlayerState.paused);
-      }
-      _setWakelock(false);
+    final value = betterPlayerController.videoPlayerController?.value;
+
+    switch (event.betterPlayerEventType) {
+      case BetterPlayerEventType.initialized:
+        _loadingTimeout?.cancel();
+        _retryAttempt = 0;
+        betterPlayerController.setVolume(_muted ? 0 : _volume);
+        betterPlayerController.setSpeed(_speed);
+        _readVideoParams(value);
+        _syncFromValue(value);
+        _applyStartAt();
+        if (!(betterPlayerController.isPlaying() ?? false)) {
+          _transition(MkPlayerState.paused);
+        }
+      case BetterPlayerEventType.play:
+        _loadingTimeout?.cancel();
+        _transition(MkPlayerState.playing);
+        _setWakelock(true);
+      case BetterPlayerEventType.pause:
+        if (_state != MkPlayerState.completed) {
+          _transition(MkPlayerState.paused);
+        }
+        _setWakelock(false);
+      case BetterPlayerEventType.progress:
+        _syncFromValue(value);
+        _readVideoParams(value);
+      case BetterPlayerEventType.bufferingStart:
+        if (_state != MkPlayerState.error) {
+          _transition(MkPlayerState.buffering);
+        }
+      case BetterPlayerEventType.bufferingEnd:
+        if (_state == MkPlayerState.buffering ||
+            _state == MkPlayerState.loading) {
+          _transition(
+            (betterPlayerController.isPlaying() ?? false)
+                ? MkPlayerState.playing
+                : MkPlayerState.paused,
+          );
+        }
+      case BetterPlayerEventType.bufferingUpdate:
+        _syncFromValue(value);
+      case BetterPlayerEventType.finished:
+        _handleCompleted();
+      case BetterPlayerEventType.exception:
+        _onError(event.parameters?['exception']?.toString() ??
+            value?.errorDescription ??
+            'Playback error');
+      case BetterPlayerEventType.setSpeed:
+      case BetterPlayerEventType.setVolume:
+        _syncFromValue(value);
+      default:
+        break;
     }
     _notify();
   }
 
-  void _handleBuffering(bool buffering) {
-    if (_disposed) return;
-    if (buffering) {
-      if (_state != MkPlayerState.error) {
-        _transition(MkPlayerState.buffering);
-        _notify();
-      }
-    } else if (_state == MkPlayerState.buffering ||
-        _state == MkPlayerState.loading) {
-      _transition(
-        _player.state.playing ? MkPlayerState.playing : MkPlayerState.paused,
-      );
-      _notify();
+  void _syncFromValue(VideoPlayerValue? v) {
+    if (v == null) return;
+    _position = v.position;
+    _duration = v.duration ?? Duration.zero;
+    // buffered is a list of ranges; surface the furthest buffered point.
+    var bufferedEnd = Duration.zero;
+    for (final range in v.buffered) {
+      if (range.end > bufferedEnd) bufferedEnd = range.end;
     }
+    _buffered = bufferedEnd;
+    if (_posterVisible && v.position > Duration.zero) _posterVisible = false;
+    _maybeFirePositionCallback(_position);
   }
 
-  void _handlePosition(Duration pos) {
-    if (_disposed) return;
-    _position = pos;
-    if (_posterVisible && pos > Duration.zero) _posterVisible = false;
-    _notify();
-    _maybeFirePositionCallback(pos);
+  void _readVideoParams(VideoPlayerValue? v) {
+    final size = v?.size;
+    if (size != null && size.width > 0 && size.height > 0) {
+      _isPortraitVideo = size.height > size.width;
+      _videoParamsReceived = true;
+    }
   }
 
   void _maybeFirePositionCallback(Duration pos) {
@@ -498,84 +523,23 @@ class CustomPlayerController extends ChangeNotifier {
     }
   }
 
-  void _handleDuration(Duration dur) {
+  void _handleCompleted() {
     if (_disposed) return;
-    _duration = dur;
-    _notify();
-  }
-
-  void _handleBuffer(Duration buf) {
-    if (_disposed) return;
-    _buffered = buf;
-    _notify();
-  }
-
-  void _handleVolume(double vol) {
-    if (_disposed) return;
-    if (!_muted) _volume = (vol / 100).clamp(0.0, 1.0);
-    _notify();
-  }
-
-  void _handleRate(double rate) {
-    if (_disposed) return;
-    _speed = rate;
-    _notify();
-  }
-
-  void _handleTracks(Tracks tracks) {
-    if (_disposed) return;
-    _audioTracks = tracks.audio;
-    _subtitleTracks = tracks.subtitle;
-    _videoTracks = tracks.video;
-    _notify();
-  }
-
-  void _handleTrack(Track track) {
-    if (_disposed) return;
-    _selectedAudioTrack = track.audio;
-    _selectedSubtitleTrack = track.subtitle;
-    _selectedVideoTrack = track.video;
-    _notify();
-  }
-
-  void _handleCompleted(bool completed) {
-    if (_disposed || !completed) return;
-    if (config.loop) {
-      _player.seek(Duration.zero).then((_) => _player.play());
-    } else {
-      _transition(MkPlayerState.completed);
-      _setWakelock(false);
-      _notify();
-      config.onCompleted?.call();
-    }
-  }
-
-  void _handleVideoParams(VideoParams params) {
-    if (_disposed) return;
-    final aspect = params.aspect;
-    if (aspect != null && aspect > 0) {
-      _isPortraitVideo = aspect < 1.0;
-      _videoParamsReceived = true;
-    }
-    _notify();
-  }
-
-  void _handleError(String error) {
-    if (_disposed) return;
-    _onError(error);
+    if (config.loop) return; // better_player handles looping itself
+    _transition(MkPlayerState.completed);
+    _setWakelock(false);
+    config.onCompleted?.call();
   }
 
   void _onError(String message) {
     _loadingTimeout?.cancel();
     _setWakelock(false);
 
-    // Attempt an automatic retry with exponential backoff before surfacing
-    // the error overlay.
+    // Automatic retry with exponential backoff before surfacing the overlay.
     if (_lastSource != null && _retryAttempt < config.autoRetryMaxAttempts) {
       _retryAttempt++;
       final base = config.autoRetryBaseDelay.inMilliseconds;
-      final backoffMs =
-          (base * (1 << (_retryAttempt - 1))).clamp(base, 30000);
+      final backoffMs = (base * (1 << (_retryAttempt - 1))).clamp(base, 30000);
       debugPrint(
         '[MkPlayer] auto-retry $_retryAttempt/${config.autoRetryMaxAttempts} '
         'in ${backoffMs}ms — $message',
@@ -623,12 +587,9 @@ class CustomPlayerController extends ChangeNotifier {
     _disposed = true;
     _loadingTimeout?.cancel();
     _retryTimer?.cancel();
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _subs.clear();
+    betterPlayerController.removeEventsListener(_onEvent);
     WakelockPlus.disable().ignore();
-    _player.dispose();
+    betterPlayerController.dispose(forceDispose: true);
     super.dispose();
   }
 }

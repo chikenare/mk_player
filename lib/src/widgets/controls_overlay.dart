@@ -807,8 +807,7 @@ class _BottomBarState extends State<_BottomBar> {
         listenable: ctrl,
         builder: (_, _) {
           final showAudio = ctrl.audioTracks.length > 1;
-          final showSubs = ctrl.subtitleTracks.isNotEmpty ||
-              ctrl.externalSubtitles.isNotEmpty;
+          final showSubs = ctrl.hasSubtitles;
           final showVolume = cfg.showVolumeControl ?? isDesktopOrWeb;
 
           return Padding(

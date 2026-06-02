@@ -3,7 +3,7 @@
 ///
 /// Provide these via [PlayerSource.externalSubtitles]. They appear in the
 /// subtitle selector alongside the embedded tracks. Selecting one loads it
-/// through `media_kit` as a URI subtitle (SRT, WebVTT, ASS, …).
+/// through `better_player_plus` as a network subtitle (SRT, WebVTT, …).
 ///
 /// ```dart
 /// PlayerSource.network(

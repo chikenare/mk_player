@@ -1,5 +1,5 @@
+import 'package:better_player_plus/better_player_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../controller.dart';
 
@@ -50,9 +50,9 @@ Future<void> showAudioSheet(
             children: [
               for (var i = 0; i < tracks.length; i++)
                 _TrackTile(
-                  label: _trackLabel(tracks[i].title, tracks[i].language, i),
+                  label: _audioLabel(tracks[i], i),
                   icon: Icons.headphones_rounded,
-                  isSelected: tracks[i] == controller.selectedAudioTrack,
+                  isSelected: tracks[i].id == controller.selectedAudioTrack?.id,
                   accentColor: controller.config.accentColor,
                   onTap: () {
                     controller.setAudioTrack(tracks[i]);
@@ -78,56 +78,30 @@ Future<void> showSubtitleSheet(
       child: ListenableBuilder(
         listenable: controller,
         builder: (ctx, _) {
-          final tracks = controller.subtitleTracks; // sentinels already filtered
-          final external = controller.externalSubtitles;
+          final sources = controller.subtitleSources;
+          final selected = controller.selectedSubtitle;
           final accent = controller.config.accentColor;
+
+          if (!controller.hasSubtitles) {
+            return const _EmptyHint('No subtitles available');
+          }
 
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _TrackTile(
-                label: 'Off',
-                icon: Icons.subtitles_off_rounded,
-                isSelected:
-                    controller.selectedSubtitleTrack == SubtitleTrack.no(),
-                accentColor: accent,
-                onTap: () {
-                  controller.disableSubtitles();
-                  Navigator.of(ctx).pop();
-                },
-              ),
-
-              // Embedded subtitle tracks
-              for (var i = 0; i < tracks.length; i++)
+              for (var i = 0; i < sources.length; i++)
                 _TrackTile(
-                  label: _trackLabel(tracks[i].title, tracks[i].language, i),
-                  icon: Icons.closed_caption_rounded,
-                  isSelected: tracks[i] == controller.selectedSubtitleTrack,
+                  label: _subtitleLabel(sources[i], i),
+                  icon: sources[i].type == BetterPlayerSubtitlesSourceType.none
+                      ? Icons.subtitles_off_rounded
+                      : Icons.closed_caption_rounded,
+                  isSelected: sources[i] == selected,
                   accentColor: accent,
                   onTap: () {
-                    controller.setSubtitleTrack(tracks[i]);
+                    controller.setSubtitle(sources[i]);
                     Navigator.of(ctx).pop();
                   },
                 ),
-
-              // External subtitles supplied by the host app
-              for (var i = 0; i < external.length; i++)
-                _TrackTile(
-                  label: external[i].title ??
-                      external[i].language?.toUpperCase() ??
-                      'External ${i + 1}',
-                  icon: Icons.translate_rounded,
-                  isSelected:
-                      controller.isExternalSubtitleSelected(external[i]),
-                  accentColor: accent,
-                  onTap: () {
-                    controller.setExternalSubtitle(external[i]);
-                    Navigator.of(ctx).pop();
-                  },
-                ),
-
-              if (tracks.isEmpty && external.isEmpty)
-                const _EmptyHint('No subtitles available'),
             ],
           );
         },
@@ -351,8 +325,19 @@ class _EmptyHint extends StatelessWidget {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-String _trackLabel(String? title, String? lang, int index) {
-  if (title != null && title.isNotEmpty) return title;
+String _audioLabel(BetterPlayerAsmsAudioTrack track, int index) {
+  final label = track.label;
+  if (label != null && label.isNotEmpty) return label;
+  final lang = track.language;
   if (lang != null && lang.isNotEmpty) return lang.toUpperCase();
   return 'Track ${index + 1}';
+}
+
+String _subtitleLabel(BetterPlayerSubtitlesSource source, int index) {
+  if (source.type == BetterPlayerSubtitlesSourceType.none) return 'Off';
+  final name = source.name;
+  if (name != null && name.isNotEmpty && name != 'Default subtitles') {
+    return name;
+  }
+  return 'Subtitle ${index + 1}';
 }

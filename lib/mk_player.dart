@@ -1,4 +1,5 @@
-// mk_player — A highly reusable Flutter video player built on media_kit.
+// mk_player — A highly reusable Flutter video player built on
+// better_player_plus (ExoPlayer on Android).
 //
 // Import this single barrel file in your host application:
 //   import 'package:mk_player/mk_player.dart';
@@ -18,8 +19,10 @@ export 'src/controller.dart' show CustomPlayerController, MkPlayerState;
 // ── UI ────────────────────────────────────────────────────────────────────────
 export 'src/player_view.dart' show PlayerView;
 
-// ── Re-export only the media_kit surface types the host app needs ─────────────
-export 'package:media_kit/media_kit.dart'
-    show AudioTrack, SubtitleTrack, VideoTrack;
-export 'package:media_kit_video/media_kit_video.dart'
-    show VideoController, SubtitleViewConfiguration;
+// ── Re-export the better_player track/subtitle types host apps may need ───────
+export 'package:better_player_plus/better_player_plus.dart'
+    show
+        BetterPlayerAsmsAudioTrack,
+        BetterPlayerAsmsTrack,
+        BetterPlayerSubtitlesSource,
+        BetterPlayerSubtitlesSourceType;
