@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/storyboard.dart';
@@ -5,6 +7,10 @@ import 'progress_bar.dart' show formatDuration;
 
 // Image-size cache: avoid re-resolving the same sprite sheet on every rebuild.
 final _sizeCache = <String, Size>{};
+
+// Fixed thumbnail aspect ratio (horizontal). Storyboard crops can be narrow or
+// oddly shaped; we always render into a 16:9 frame and cover it.
+const double _kThumbAspect = 16 / 9;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ThumbnailPreview — popup shown above the scrubber while dragging
@@ -14,8 +20,7 @@ class ThumbnailPreview extends StatelessWidget {
   final StoryboardEntry? entry;
   final Duration position;
 
-  /// Display width of the thumbnail image. Height is derived from the crop
-  /// aspect ratio (falls back to 16:9 when no crop is available).
+  /// Display width of the thumbnail image. Height is fixed to a 16:9 ratio.
   final double width;
 
   const ThumbnailPreview({
@@ -28,36 +33,20 @@ class ThumbnailPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = entry;
-    final imgH = e?.crop != null
-        ? width * e!.crop!.height / e.crop!.width
-        : width * 9 / 16;
+    final height = width / _kThumbAspect;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // ── Thumbnail frame ──────────────────────────────────────────────────
-        Container(
-          width: width,
-          height: imgH,
-          decoration: BoxDecoration(
-            color: Colors.black,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(color: Colors.white24, width: 1),
-          ),
-          clipBehavior: Clip.hardEdge,
-          child: e != null
-              ? _SpriteImage(entry: e, width: width)
-              : const Center(
-                  child: Icon(
-                    Icons.image_not_supported_outlined,
-                    color: Colors.white24,
-                    size: 20,
-                  ),
-                ),
-        ),
+        // Only rendered when there is an entry; the frame hides itself if the
+        // image fails to load (no broken-image placeholder).
+        if (e != null) ...[
+          _ThumbFrame(entry: e, width: width, height: height),
+          const SizedBox(height: 5),
+        ],
 
         // ── Time label ───────────────────────────────────────────────────────
-        const SizedBox(height: 5),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           decoration: BoxDecoration(
@@ -80,50 +69,56 @@ class ThumbnailPreview extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SpriteImage — renders a cropped region of a sprite sheet
+// _ThumbFrame — bordered 16:9 frame that renders a (cropped) sprite region.
+// Collapses to nothing if the image is missing or fails to load.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SpriteImage extends StatefulWidget {
+class _ThumbFrame extends StatefulWidget {
   final StoryboardEntry entry;
   final double width;
+  final double height;
 
-  const _SpriteImage({required this.entry, required this.width});
+  const _ThumbFrame({
+    required this.entry,
+    required this.width,
+    required this.height,
+  });
 
   @override
-  State<_SpriteImage> createState() => _SpriteImageState();
+  State<_ThumbFrame> createState() => _ThumbFrameState();
 }
 
-class _SpriteImageState extends State<_SpriteImage> {
+class _ThumbFrameState extends State<_ThumbFrame> {
   Size? _spriteSize;
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
-    final url = widget.entry.imageUrl;
-    if (_sizeCache.containsKey(url)) {
-      _spriteSize = _sizeCache[url];
-    } else {
-      _resolveSize(url);
-    }
+    _resolveForEntry();
   }
 
   @override
-  void didUpdateWidget(_SpriteImage old) {
+  void didUpdateWidget(_ThumbFrame old) {
     super.didUpdateWidget(old);
     if (old.entry.imageUrl != widget.entry.imageUrl) {
-      final url = widget.entry.imageUrl;
-      if (_sizeCache.containsKey(url)) {
-        setState(() => _spriteSize = _sizeCache[url]);
-      } else {
-        setState(() => _spriteSize = null);
-        _resolveSize(url);
-      }
+      _failed = false;
+      _spriteSize = null;
+      _resolveForEntry();
     }
   }
 
-  void _resolveSize(String url) {
-    final provider = NetworkImage(url);
-    final stream = provider.resolve(const ImageConfiguration());
+  // Sprite-sheet crops need the source dimensions to compute the cover scale;
+  // single-frame images (no crop) don't.
+  void _resolveForEntry() {
+    if (widget.entry.crop == null) return;
+    final url = widget.entry.imageUrl;
+    final cached = _sizeCache[url];
+    if (cached != null) {
+      _spriteSize = cached;
+      return;
+    }
+    final stream = NetworkImage(url).resolve(const ImageConfiguration());
     late ImageStreamListener listener;
     listener = ImageStreamListener(
       (info, _) {
@@ -135,79 +130,89 @@ class _SpriteImageState extends State<_SpriteImage> {
         _sizeCache[url] = s;
         if (mounted) setState(() => _spriteSize = s);
       },
-      onError: (_, _) => stream.removeListener(listener),
+      onError: (_, _) {
+        stream.removeListener(listener);
+        if (mounted) setState(() => _failed = true);
+      },
     );
     stream.addListener(listener);
   }
 
+  void _markFailed() {
+    if (_failed) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _failed = true);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_failed) return const SizedBox.shrink();
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: Colors.white24, width: 1),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: _buildImage(),
+    );
+  }
+
+  Widget _buildImage() {
     final crop = widget.entry.crop;
 
-    // No crop info → show full image (individual frame per cue).
+    // No crop info → a single full frame per cue; cover the 16:9 box.
     if (crop == null) {
       return Image.network(
         widget.entry.imageUrl,
         width: widget.width,
+        height: widget.height,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => const _ErrorPlaceholder(),
+        errorBuilder: (_, _, _) {
+          _markFailed();
+          return const SizedBox.shrink();
+        },
       );
     }
 
-    final spriteW = _spriteSize?.width;
-
-    // While the sprite size resolves, show a placeholder the same size as
-    // the thumbnail will be.
-    if (spriteW == null) {
-      return SizedBox(
-        width: widget.width,
-        height: widget.width * crop.height / crop.width,
-        child: const Center(
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 1.5),
-          ),
+    final spriteSize = _spriteSize;
+    if (spriteSize == null) {
+      // Still resolving the sprite-sheet dimensions.
+      return const Center(
+        child: SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 1.5),
         ),
       );
     }
 
-    // Scale the sprite sheet so that the crop fills [widget.width] horizontally.
-    final scale = widget.width / crop.width;
-    final renderW = spriteW * scale;
+    // Scale the sprite so the crop region COVERS the fixed 16:9 box, then
+    // centre it (overflow is clipped by the parent Container).
+    final scale = max(widget.width / crop.width, widget.height / crop.height);
+    final renderW = spriteSize.width * scale;
+    final dx = -crop.left * scale - (crop.width * scale - widget.width) / 2;
+    final dy = -crop.top * scale - (crop.height * scale - widget.height) / 2;
 
-    return SizedBox(
-      width: widget.width,
-      height: crop.height * scale,
-      child: OverflowBox(
-        alignment: Alignment.topLeft,
-        maxWidth: double.infinity,
-        maxHeight: double.infinity,
-        child: Transform.translate(
-          offset: Offset(-crop.left * scale, -crop.top * scale),
-          child: Image.network(
-            widget.entry.imageUrl,
-            width: renderW,
-            fit: BoxFit.fitWidth,
-            filterQuality: FilterQuality.medium,
-            errorBuilder: (_, _, _) => const _ErrorPlaceholder(),
-          ),
+    return OverflowBox(
+      alignment: Alignment.topLeft,
+      maxWidth: double.infinity,
+      maxHeight: double.infinity,
+      child: Transform.translate(
+        offset: Offset(dx, dy),
+        child: Image.network(
+          widget.entry.imageUrl,
+          width: renderW,
+          fit: BoxFit.fitWidth,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, _, _) {
+            _markFailed();
+            return const SizedBox.shrink();
+          },
         ),
-      ),
-    );
-  }
-}
-
-class _ErrorPlaceholder extends StatelessWidget {
-  const _ErrorPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Icon(
-        Icons.broken_image_outlined,
-        color: Colors.white24,
-        size: 20,
       ),
     );
   }

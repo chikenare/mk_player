@@ -265,7 +265,10 @@ class _PosterOverlay extends StatelessWidget {
         errorBuilder: (_, _, _) => const SizedBox.shrink(),
       );
     }
-    return Positioned.fill(child: img);
+    // NOTE: not a Positioned — this widget is nested under AnimatedOpacity, not
+    // directly inside the Stack. SizedBox.expand fills the (already tight)
+    // constraints handed down from the Stack.
+    return SizedBox.expand(child: img);
   }
 }
 

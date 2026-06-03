@@ -213,7 +213,11 @@ class CustomPlayerController extends ChangeNotifier {
             const BetterPlayerControlsConfiguration(showControls: false),
         handleLifecycle: false,
         autoDispose: false,
-        expandToFill: true,
+        // false → better_player's internal AspectRatio collapses to our
+        // (tight, full-screen) Stack constraints instead of forcing its default
+        // 16:9 box. The video fit (contain/cover/fill) is then applied against
+        // the full surface, which removes the stretched/letterboxed distortion.
+        expandToFill: false,
       ),
     );
     betterPlayerController.addEventsListener(_onEvent);
