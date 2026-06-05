@@ -9,6 +9,7 @@ import 'models/player_config.dart';
 import 'platform.dart';
 import 'widgets/controls_overlay.dart';
 import 'widgets/error_overlay.dart';
+import 'widgets/listenable_selector.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PlayerView
@@ -167,13 +168,17 @@ class _VideoCanvas extends StatelessWidget {
             BetterPlayer(controller: controller.betterPlayerController),
 
             // ── 1.5. Poster — fades out on first decoded frame ────────────
-            ListenableBuilder(
+            // Selector: rebuilds only when the (url, visible) pair flips — not
+            // on every 300ms position tick.
+            ListenableSelector<(String?, bool)>(
               listenable: controller,
-              builder: (_, _) {
-                final url = controller.currentPosterUrl;
+              selector: () =>
+                  (controller.currentPosterUrl, controller.posterVisible),
+              builder: (_, value) {
+                final (url, visible) = value;
                 if (url == null) return const SizedBox.shrink();
                 return AnimatedOpacity(
-                  opacity: controller.posterVisible ? 1.0 : 0.0,
+                  opacity: visible ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 350),
                   child: _PosterOverlay(url: url),
                 );
@@ -182,21 +187,20 @@ class _VideoCanvas extends StatelessWidget {
 
             // ── 2. Buffering spinner ───────────────────────────────────────
             if (config.showBufferingIndicator)
-              ListenableBuilder(
+              ListenableSelector<bool>(
                 listenable: controller,
-                builder: (_, _) {
-                  final show = controller.isBuffering || controller.isLoading;
-                  return show
-                      ? const _BufferingIndicator()
-                      : const SizedBox.shrink();
-                },
+                selector: () => controller.isBuffering || controller.isLoading,
+                builder: (_, show) => show
+                    ? const _BufferingIndicator()
+                    : const SizedBox.shrink(),
               ),
 
             // ── 3. Error overlay ───────────────────────────────────────────
-            ListenableBuilder(
+            ListenableSelector<bool>(
               listenable: controller,
-              builder: (ctx, _) {
-                if (!controller.hasError) return const SizedBox.shrink();
+              selector: () => controller.hasError,
+              builder: (ctx, hasError) {
+                if (!hasError) return const SizedBox.shrink();
                 return PlayerErrorOverlay(
                   message: controller.errorMessage,
                   onRetry: controller.retry,
@@ -208,12 +212,18 @@ class _VideoCanvas extends StatelessWidget {
             ),
 
             // ── 4. Controls overlay ────────────────────────────────────────
-            ListenableBuilder(
+            // The heavy controls subtree must NOT rebuild on every position
+            // tick. Position-dependent pieces (progress bar, time, play/pause
+            // icon) have their own fine-grained ListenableBuilders inside the
+            // overlay; here we only need to gate visibility on hasError/pip,
+            // which flip rarely. A ListenableSelector keeps the overlay stable in
+            // between, eliminating the ~3×/second full-tree rebuild that was
+            // competing with video compositing on the UI thread.
+            ListenableSelector<bool>(
               listenable: controller,
-              builder: (_, _) {
-                if (controller.hasError || controller.pipActive) {
-                  return const SizedBox.shrink();
-                }
+              selector: () => controller.hasError || controller.pipActive,
+              builder: (_, hidden) {
+                if (hidden) return const SizedBox.shrink();
                 return PlayerControlsOverlay(
                   controller: controller,
                   config: config,

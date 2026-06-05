@@ -6,6 +6,7 @@ import '../controller.dart';
 import '../models/player_config.dart';
 import '../models/video_fit.dart';
 import '../platform.dart';
+import 'listenable_selector.dart';
 import 'progress_bar.dart';
 import 'settings_sheet.dart';
 
@@ -801,90 +802,102 @@ class _BottomBarState extends State<_BottomBar> {
 
   @override
   Widget build(BuildContext context) {
+    final showVolume = cfg.showVolumeControl ?? isDesktopOrWeb;
+
     return SafeArea(
       top: false,
-      child: ListenableBuilder(
-        listenable: ctrl,
-        builder: (_, _) {
-          final showAudio = ctrl.audioTracks.length > 1;
-          final showSubs = ctrl.hasSubtitles;
-          final showVolume = cfg.showVolumeControl ?? isDesktopOrWeb;
-
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Progress bar
-                PlayerProgressBar(
-                  position: ctrl.position,
-                  duration: ctrl.duration,
-                  buffered: ctrl.buffered,
-                  accentColor: cfg.accentColor,
-                  storyboard: ctrl.storyboard,
-                  onScrubStart: widget.onScrubStart,
-                  onScrubEnd: widget.onScrubEnd,
-                  onSeek: ctrl.isLive
-                      ? null
-                      : (d) {
-                          ctrl.seek(d);
-                          widget.onActivity();
-                        },
-                ),
-
-                // Time row
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 0, 2, 0),
-                  child: Row(
-                    children: [
-                      Text(
-                        formatDuration(ctrl.position),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      if (ctrl.isLive)
-                        const _LiveBadge()
-                      else
-                        GestureDetector(
-                          onTap: () {
-                            setState(() => _showRemaining = !_showRemaining);
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Progress + time ────────────────────────────────────────────
+            // These depend on position/duration, which advance on every 300ms
+            // tick, so this part legitimately rebuilds per tick.
+            ListenableBuilder(
+              listenable: ctrl,
+              builder: (_, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PlayerProgressBar(
+                    position: ctrl.position,
+                    duration: ctrl.duration,
+                    buffered: ctrl.buffered,
+                    accentColor: cfg.accentColor,
+                    storyboard: ctrl.storyboard,
+                    onScrubStart: widget.onScrubStart,
+                    onScrubEnd: widget.onScrubEnd,
+                    onSeek: ctrl.isLive
+                        ? null
+                        : (d) {
+                            ctrl.seek(d);
                             widget.onActivity();
                           },
-                          child: Text(
-                            _showRemaining
-                                ? '  -${formatDuration(ctrl.remaining)}'
-                                : '  /  ${formatDuration(ctrl.duration)}',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
+                  ),
+
+                  // Time row
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 0, 2, 0),
+                    child: Row(
+                      children: [
+                        Text(
+                          formatDuration(ctrl.position),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
-                      const Spacer(),
-                      if (showVolume)
-                        _VolumeButton(
-                          controller: ctrl,
-                          onActivity: widget.onActivity,
-                        ),
-                    ],
+                        if (ctrl.isLive)
+                          const _LiveBadge()
+                        else
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _showRemaining = !_showRemaining);
+                              widget.onActivity();
+                            },
+                            child: Text(
+                              _showRemaining
+                                  ? '  -${formatDuration(ctrl.remaining)}'
+                                  : '  /  ${formatDuration(ctrl.duration)}',
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ),
+                        const Spacer(),
+                        if (showVolume)
+                          _VolumeButton(
+                            controller: ctrl,
+                            onActivity: widget.onActivity,
+                          ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
+              ),
+            ),
 
-                // ── Action buttons row (Netflix-style) ─────────────────────
-                Padding(
+            // ── Action buttons row (Netflix-style) ─────────────────────────
+            // Track availability and the speed label change rarely, so a
+            // selector keeps this row stable between ticks instead of
+            // rebuilding it ~3×/second along with the progress bar.
+            ListenableSelector<(bool, bool, double)>(
+              listenable: ctrl,
+              selector: () =>
+                  (ctrl.audioTracks.length > 1, ctrl.hasSubtitles, ctrl.speed),
+              builder: (_, value) {
+                final (showAudio, showSubs, speed) = value;
+                return Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Row(
                     children: [
                       _ActionButton(
                         icon: Icons.speed_rounded,
-                        label: ctrl.speed == 1.0
-                            ? 'Speed'
-                            : 'Speed · ${ctrl.speed}×',
+                        label: speed == 1.0 ? 'Speed' : 'Speed · $speed×',
                         onTap: () {
                           widget.onActivity();
                           showSpeedSheet(context, ctrl);
@@ -910,11 +923,11 @@ class _BottomBarState extends State<_BottomBar> {
                         ),
                     ],
                   ),
-                ),
-              ],
+                );
+              },
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
