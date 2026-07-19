@@ -26,10 +26,11 @@ class PlayerSource {
 
   /// Container format of the stream.
   ///
-  /// When `null` the format is auto-detected from the URL path extension
-  /// (`.mpd` → DASH, `.m3u8` → HLS). Set it explicitly for URLs where the
-  /// extension is missing or not the last path segment (signed CDN links,
-  /// proxied URLs, etc.), since native inference would otherwise fail.
+  /// When `null` the format is auto-detected via [PlayerVideoFormat.fromUrl],
+  /// which scans every path segment (`.mpd` → DASH, `.m3u8` → HLS, `.ism` →
+  /// Smooth Streaming), so tokenized CDN links with the manifest in a middle
+  /// segment are handled too. Set it explicitly only when the URL carries no
+  /// format hint at all (fully opaque proxied URLs).
   final PlayerVideoFormat? format;
 
   /// Whether this source is a live stream.

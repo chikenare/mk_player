@@ -282,26 +282,19 @@ class CustomPlayerController extends ChangeNotifier {
     );
   }
 
-  /// Resolves the explicit [PlayerSource.format], falling back to detection by
-  /// URL path extension. Returning null lets the native player infer the
-  /// format itself.
+  /// Resolves the explicit [PlayerSource.format], falling back to
+  /// [PlayerVideoFormat.fromUrl] auto-detection. Returning null lets the
+  /// native player infer the format itself.
   BetterPlayerVideoFormat? _videoFormatOf(PlayerSource source) {
-    if (source.format != null) {
-      return switch (source.format!) {
-        PlayerVideoFormat.dash => BetterPlayerVideoFormat.dash,
-        PlayerVideoFormat.hls => BetterPlayerVideoFormat.hls,
-        PlayerVideoFormat.ss => BetterPlayerVideoFormat.ss,
-        PlayerVideoFormat.other => BetterPlayerVideoFormat.other,
-      };
-    }
-    final url = source.url;
-    if (url == null) return null;
-    // Detect on the path only: a `.mpd`/`.m3u8` inside query params or a
-    // signed-token segment must not misclassify the stream.
-    final path = (Uri.tryParse(url)?.path ?? url).toLowerCase();
-    if (path.endsWith('.mpd')) return BetterPlayerVideoFormat.dash;
-    if (path.endsWith('.m3u8')) return BetterPlayerVideoFormat.hls;
-    return null;
+    final format = source.format ??
+        (source.url != null ? PlayerVideoFormat.fromUrl(source.url!) : null);
+    return switch (format) {
+      PlayerVideoFormat.dash => BetterPlayerVideoFormat.dash,
+      PlayerVideoFormat.hls => BetterPlayerVideoFormat.hls,
+      PlayerVideoFormat.ss => BetterPlayerVideoFormat.ss,
+      PlayerVideoFormat.other => BetterPlayerVideoFormat.other,
+      null => null,
+    };
   }
 
   // Resets per-source state and enters the loading phase. Storyboard fetch is
