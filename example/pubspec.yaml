@@ -20,3 +20,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+dependency_overrides:
+  wakelock_plus: 1.5.2

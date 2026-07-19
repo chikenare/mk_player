@@ -1,4 +1,5 @@
 import 'external_subtitle.dart';
+import 'video_format.dart';
 
 /// Describes a single playable media source.
 ///
@@ -22,6 +23,14 @@ class PlayerSource {
   /// The seek is applied after the first `playing` event fires, so it works
   /// reliably with both progressive and adaptive (HLS/DASH) streams.
   final Duration? startAt;
+
+  /// Container format of the stream.
+  ///
+  /// When `null` the format is auto-detected from the URL path extension
+  /// (`.mpd` → DASH, `.m3u8` → HLS). Set it explicitly for URLs where the
+  /// extension is missing or not the last path segment (signed CDN links,
+  /// proxied URLs, etc.), since native inference would otherwise fail.
+  final PlayerVideoFormat? format;
 
   /// Whether this source is a live stream.
   ///
@@ -58,6 +67,7 @@ class PlayerSource {
     String this.url, {
     this.headers = const {},
     this.title,
+    this.format,
     this.startAt,
     this.isLive = false,
     this.posterUrl,
@@ -76,6 +86,7 @@ class PlayerSource {
     this.storyboardHeaders = const {},
     this.externalSubtitles = const [],
   })  : url = null,
+        format = null,
         headers = const {};
 
   bool get isLocal => path != null;
