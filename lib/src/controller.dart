@@ -127,6 +127,10 @@ class CustomPlayerController extends ChangeNotifier {
   // onPositionChanged throttle
   DateTime? _lastPositionCallback;
 
+  // Play/pause desync watchdog (see _checkPlaybackWatchdog).
+  Duration _watchdogPosition = Duration.zero;
+  DateTime? _watchdogLastAdvance;
+
   // ── Getters ────────────────────────────────────────────────────────────────
 
   MkPlayerState get state => _state;
@@ -374,6 +378,11 @@ class CustomPlayerController extends ChangeNotifier {
 
   Future<void> play() async {
     if (_disposed) return;
+    // ExoPlayer ignores play() while ended, which would leave the UI claiming
+    // "playing" over a still frame — replay from the start instead.
+    if (_state == MkPlayerState.completed) {
+      await seek(Duration.zero);
+    }
     await betterPlayerController.play();
   }
 
@@ -387,7 +396,7 @@ class CustomPlayerController extends ChangeNotifier {
     if (betterPlayerController.isPlaying() ?? false) {
       await betterPlayerController.pause();
     } else {
-      await betterPlayerController.play();
+      await play(); // routes through the completed-replay handling
     }
   }
 
@@ -524,6 +533,7 @@ class CustomPlayerController extends ChangeNotifier {
         }
       case BetterPlayerEventType.play:
         _loadingTimeout?.cancel();
+        _watchdogLastAdvance = null;
         _transition(MkPlayerState.playing);
         _setWakelock(true);
       case BetterPlayerEventType.pause:
@@ -534,6 +544,7 @@ class CustomPlayerController extends ChangeNotifier {
       case BetterPlayerEventType.progress:
         _syncFromValue(value);
         _readVideoParams(value);
+        _checkPlaybackWatchdog();
       case BetterPlayerEventType.bufferingStart:
         if (_state != MkPlayerState.error) {
           _transition(MkPlayerState.buffering);
@@ -576,6 +587,35 @@ class CustomPlayerController extends ChangeNotifier {
     _buffered = bufferedEnd;
     if (_posterVisible && v.position > Duration.zero) _posterVisible = false;
     _maybeFirePositionCallback(_position);
+  }
+
+  /// Repairs the "icon says playing but the video is paused" desync.
+  ///
+  /// The native side only reports buffering/ready/ended state changes — a
+  /// pause originated natively (audio focus, system PiP controls, a play()
+  /// ExoPlayer ignored) never produces a Dart event, so [_state] stays
+  /// `playing`. While Dart believes it is playing, better_player keeps polling
+  /// position every 300ms; if that position freezes for a few seconds outside
+  /// of buffering, the player is not actually advancing — force a pause() so
+  /// the Dart layer and the UI re-align with reality.
+  void _checkPlaybackWatchdog() {
+    if (_state != MkPlayerState.playing || _isLive) {
+      _watchdogLastAdvance = null;
+      return;
+    }
+    final now = DateTime.now();
+    if (_watchdogLastAdvance == null || _position != _watchdogPosition) {
+      _watchdogPosition = _position;
+      _watchdogLastAdvance = now;
+      return;
+    }
+    if (now.difference(_watchdogLastAdvance!) > const Duration(seconds: 3)) {
+      _watchdogLastAdvance = null;
+      debugPrint(
+        '[MkPlayer] position frozen while state=playing — syncing to paused',
+      );
+      betterPlayerController.pause();
+    }
   }
 
   void _readVideoParams(VideoPlayerValue? v) {

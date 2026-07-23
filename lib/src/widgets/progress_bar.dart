@@ -39,6 +39,30 @@ class PlayerProgressBar extends StatefulWidget {
 
 class _PlayerProgressBarState extends State<PlayerProgressBar> {
   double? _dragValue;
+  bool _dragging = false;
+
+  // After releasing a scrub, the async seek takes a moment; keep showing the
+  // released value until position catches up (or a timeout passes) so the
+  // thumb doesn't flash back to the pre-seek position.
+  Duration? _pendingSeek;
+  DateTime? _pendingSeekAt;
+
+  @override
+  void didUpdateWidget(covariant PlayerProgressBar old) {
+    super.didUpdateWidget(old);
+    final pending = _pendingSeek;
+    if (pending == null) return;
+    final caughtUp =
+        (widget.position - pending).abs() < const Duration(milliseconds: 900);
+    final timedOut = _pendingSeekAt != null &&
+        DateTime.now().difference(_pendingSeekAt!) >
+            const Duration(milliseconds: 2500);
+    if (caughtUp || timedOut) {
+      _pendingSeek = null;
+      _pendingSeekAt = null;
+      _dragValue = null;
+    }
+  }
 
   double get _progress {
     if (widget.duration.inMilliseconds == 0) return 0.0;
@@ -60,23 +84,34 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
   }
 
   void _onChangeStart(double v) {
-    setState(() => _dragValue = v);
+    setState(() {
+      _dragValue = v;
+      _dragging = true;
+    });
     widget.onScrubStart?.call();
   }
 
   void _onChanged(double v) => setState(() => _dragValue = v);
 
   void _onChangeEnd(double v) {
-    final ms = (v * widget.duration.inMilliseconds).round();
-    widget.onSeek?.call(Duration(milliseconds: ms));
-    setState(() => _dragValue = null);
+    final target = Duration(
+      milliseconds: (v * widget.duration.inMilliseconds).round(),
+    );
+    widget.onSeek?.call(target);
+    setState(() {
+      // Hold the released value; didUpdateWidget clears it once the player's
+      // reported position reaches the target.
+      _dragging = false;
+      _pendingSeek = target;
+      _pendingSeekAt = DateTime.now();
+    });
     widget.onScrubEnd?.call();
   }
 
   @override
   Widget build(BuildContext context) {
     final displayValue = _dragValue ?? _progress;
-    final isScrubbing = _dragValue != null;
+    final isScrubbing = _dragging;
 
     const thumbR = 7.0;
     const overlayR = 16.0;

@@ -93,7 +93,7 @@ class _PlayerViewState extends State<PlayerView> {
 
   Future<void> _toggleFullscreen() async {
     if (_isFullscreen) {
-      await _exitFullscreen();
+      _exitFullscreen();
     } else {
       await _enterFullscreen();
     }
@@ -123,16 +123,19 @@ class _PlayerViewState extends State<PlayerView> {
         onExit: _exitFullscreen,
       ),
     );
-  }
-
-  Future<void> _exitFullscreen() async {
-    if (mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
+    // Runs however the route was popped — the exit-fullscreen button OR the
+    // system back gesture — so orientation and state are always restored.
     // Empty list = restore system default (honours the user's rotation lock).
     await SystemChrome.setPreferredOrientations([]);
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     if (mounted) setState(() => _isFullscreen = false);
+  }
+
+  void _exitFullscreen() {
+    // Restoration happens in _enterFullscreen when the pushed route resolves.
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 }
 
