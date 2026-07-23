@@ -4,6 +4,7 @@ import 'package:better_player_plus/better_player_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'dash/dash_side_loader.dart';
 import 'models/player_config.dart';
 import 'models/player_source.dart';
 import 'models/storyboard.dart';
@@ -155,9 +156,21 @@ class CustomPlayerController extends ChangeNotifier {
 
   // ── Tracks (HLS/DASH ASMS) ───────────────────────────────────────────────────
 
+  // better_player_plus parses .mpd manifests with its HLS parser and finds
+  // nothing, so DASH audio tracks are parsed on our side (DashSideLoader) and
+  // surfaced through the same getter.
+  List<BetterPlayerAsmsAudioTrack> _dashAudioTracks = const [];
+
+  // Invalidates in-flight DASH side loads when a new load begins (e.g. an
+  // auto-retry), so a stale load can't inject tracks twice.
+  int _dashLoadGeneration = 0;
+
   /// Selectable audio tracks parsed from the HLS/DASH manifest.
-  List<BetterPlayerAsmsAudioTrack> get audioTracks =>
-      betterPlayerController.betterPlayerAsmsAudioTracks ?? const [];
+  List<BetterPlayerAsmsAudioTrack> get audioTracks {
+    final native = betterPlayerController.betterPlayerAsmsAudioTracks;
+    if (native != null && native.isNotEmpty) return native;
+    return _dashAudioTracks;
+  }
   BetterPlayerAsmsAudioTrack? get selectedAudioTrack =>
       betterPlayerController.betterPlayerAsmsAudioTrack;
 
@@ -241,7 +254,45 @@ class CustomPlayerController extends ChangeNotifier {
     } catch (e, st) {
       debugPrint('[MkPlayer] setupDataSource error: $e\n$st');
       _onError('Unable to open source: $e');
+      return;
     }
+    if (_videoFormatOf(source) == BetterPlayerVideoFormat.dash &&
+        !source.isLocal &&
+        source.url != null) {
+      unawaited(_loadDashSideData(source));
+    }
+  }
+
+  /// better_player_plus never extracts tracks/subtitles from DASH manifests
+  /// (it runs its HLS parser on the .mpd), so they are parsed here and
+  /// injected into the player's own lists.
+  Future<void> _loadDashSideData(PlayerSource source) async {
+    final generation = _dashLoadGeneration;
+    final data = await DashSideLoader.load(source.url!, source.headers);
+    // The source may have changed, a retry restarted the load, or the
+    // controller been disposed while segments were downloading.
+    if (data == null || _disposed || generation != _dashLoadGeneration) return;
+
+    _dashAudioTracks = data.audioTracks;
+
+    final videoTracks = betterPlayerController.betterPlayerAsmsTracks;
+    if (videoTracks.isEmpty) videoTracks.addAll(data.videoTracks);
+
+    if (data.subtitles.isNotEmpty) {
+      // Keep the "off" entry last, mirroring better_player's own ordering.
+      final sources = betterPlayerController.betterPlayerSubtitlesSourceList;
+      final noneIndex = sources
+          .indexWhere((s) => s.type == BetterPlayerSubtitlesSourceType.none);
+      sources.insertAll(
+          noneIndex >= 0 ? noneIndex : sources.length, data.subtitles);
+    }
+
+    // Reflect the stream's default audio in the UI (ExoPlayer starts with the
+    // first/default adaptation set on its own).
+    if (_dashAudioTracks.isNotEmpty && selectedAudioTrack == null) {
+      betterPlayerController.setAudioTrack(_dashAudioTracks.first);
+    }
+    _notify();
   }
 
   /// Opening a playlist is not supported by the better_player backend in this
@@ -303,6 +354,8 @@ class CustomPlayerController extends ChangeNotifier {
     _lastSource = source;
     _currentTitle = source.title;
     _storyboard = null;
+    _dashAudioTracks = const [];
+    _dashLoadGeneration++;
     _isLive = source.isLive;
     _videoParamsReceived = false;
     _pendingStartAt = source.startAt;
