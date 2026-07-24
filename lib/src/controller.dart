@@ -4,6 +4,7 @@ import 'package:better_player_plus/better_player_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'dash/dash_manifest.dart';
 import 'dash/dash_side_loader.dart';
 import 'models/player_config.dart';
 import 'models/player_source.dart';
@@ -169,6 +170,14 @@ class CustomPlayerController extends ChangeNotifier {
   // auto-retry), so a stale load can't inject tracks twice.
   int _dashLoadGeneration = 0;
 
+  // wvtt-in-fMP4 DASH subtitles are only downloaded when selected; this maps
+  // each placeholder source in the player's list to its manifest track.
+  final Map<BetterPlayerSubtitlesSource, DashTextTrack> _lazyDashSubtitles = {};
+  BetterPlayerSubtitlesSource? _subtitleLoadingSource;
+
+  /// True while a lazily-loaded DASH subtitle track is being downloaded.
+  bool get subtitleLoading => _subtitleLoadingSource != null;
+
   /// Selectable audio tracks parsed from the HLS/DASH manifest.
   List<BetterPlayerAsmsAudioTrack> get audioTracks {
     final native = betterPlayerController.betterPlayerAsmsAudioTracks;
@@ -270,11 +279,15 @@ class CustomPlayerController extends ChangeNotifier {
   /// better_player_plus never extracts tracks/subtitles from DASH manifests
   /// (it runs its HLS parser on the .mpd), so they are parsed here and
   /// injected into the player's own lists.
+  ///
+  /// Only the manifest is fetched here, so audio/quality/subtitle menus fill
+  /// as soon as it parses; fMP4 subtitle segments download on selection
+  /// ([_loadLazyDashSubtitle]).
   Future<void> _loadDashSideData(PlayerSource source) async {
     final generation = _dashLoadGeneration;
     final data = await DashSideLoader.load(source.url!, source.headers);
     // The source may have changed, a retry restarted the load, or the
-    // controller been disposed while segments were downloading.
+    // controller been disposed while the manifest was downloading.
     if (data == null || _disposed || generation != _dashLoadGeneration) return;
 
     _dashAudioTracks = data.audioTracks;
@@ -283,18 +296,64 @@ class CustomPlayerController extends ChangeNotifier {
     if (videoTracks.isEmpty) videoTracks.addAll(data.videoTracks);
 
     if (data.subtitles.isNotEmpty) {
+      for (final entry in data.subtitles) {
+        final lazy = entry.lazyTrack;
+        if (lazy != null) _lazyDashSubtitles[entry.source] = lazy;
+      }
       // Keep the "off" entry last, mirroring better_player's own ordering.
       final sources = betterPlayerController.betterPlayerSubtitlesSourceList;
       final noneIndex = sources
           .indexWhere((s) => s.type == BetterPlayerSubtitlesSourceType.none);
-      sources.insertAll(
-          noneIndex >= 0 ? noneIndex : sources.length, data.subtitles);
+      sources.insertAll(noneIndex >= 0 ? noneIndex : sources.length,
+          [for (final entry in data.subtitles) entry.source]);
     }
 
     // Reflect the stream's default audio in the UI (ExoPlayer starts with the
     // first/default adaptation set on its own).
     if (_dashAudioTracks.isNotEmpty && selectedAudioTrack == null) {
       betterPlayerController.setAudioTrack(_dashAudioTracks.first);
+    }
+    _notify();
+  }
+
+  /// Downloads and converts a lazily-loaded fMP4 DASH subtitle, then swaps
+  /// the placeholder for the real in-memory source and selects it (unless the
+  /// user picked something else in the meantime).
+  Future<void> _loadLazyDashSubtitle(
+    BetterPlayerSubtitlesSource placeholder,
+    DashTextTrack track,
+  ) async {
+    if (_subtitleLoadingSource == placeholder) return; // already in flight
+    final generation = _dashLoadGeneration;
+    _subtitleLoadingSource = placeholder;
+    // Select the (empty) placeholder right away so the menu reflects the tap.
+    await betterPlayerController.setupSubtitleSource(placeholder);
+    _notify();
+
+    final vtt = await DashSideLoader.loadFmp4Subtitle(
+        track, _lastSource?.headers ?? const {});
+    if (_disposed || generation != _dashLoadGeneration) return;
+    _subtitleLoadingSource = null;
+
+    if (vtt == null) {
+      // Nothing usable downloaded — deselect so the UI doesn't claim a track
+      // that renders nothing. The placeholder stays selectable for a retry.
+      if (selectedSubtitle == placeholder) await disableSubtitles();
+      _notify();
+      return;
+    }
+
+    final real = BetterPlayerSubtitlesSource(
+      type: BetterPlayerSubtitlesSourceType.memory,
+      name: placeholder.name,
+      content: vtt,
+    );
+    final sources = betterPlayerController.betterPlayerSubtitlesSourceList;
+    final index = sources.indexOf(placeholder);
+    if (index >= 0) sources[index] = real;
+    _lazyDashSubtitles.remove(placeholder);
+    if (selectedSubtitle == placeholder) {
+      await betterPlayerController.setupSubtitleSource(real);
     }
     _notify();
   }
@@ -360,6 +419,8 @@ class CustomPlayerController extends ChangeNotifier {
     _storyboard = null;
     _dashAudioTracks = const [];
     _dashLoadGeneration++;
+    _lazyDashSubtitles.clear();
+    _subtitleLoadingSource = null;
     _isLive = source.isLive;
     _videoParamsReceived = false;
     _pendingStartAt = source.startAt;
@@ -449,6 +510,11 @@ class CustomPlayerController extends ChangeNotifier {
 
   Future<void> setSubtitle(BetterPlayerSubtitlesSource source) async {
     if (_disposed) return;
+    final lazyTrack = _lazyDashSubtitles[source];
+    if (lazyTrack != null) {
+      await _loadLazyDashSubtitle(source, lazyTrack);
+      return;
+    }
     await betterPlayerController.setupSubtitleSource(source);
     _notify();
   }
