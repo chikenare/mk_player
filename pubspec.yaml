@@ -13,9 +13,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  better_player_plus: 1.2.1
-  wakelock_plus: ^1.2.10
-  xml: ^6.5.0
+  better_player_plus: 
+    git: https://github.com/chikenare/better_player_plus.git
+  wakelock_plus: ^1.7.0
+  xml: ^7.0.1 
 
 dev_dependencies:
   flutter_test:
