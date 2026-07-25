@@ -240,6 +240,10 @@ CustomPlayerController(
 
     // ── UI
     accentColor: Color(0xFF0071EB),      // progress bar + highlights
+    subtitlesConfiguration: BetterPlayerSubtitlesConfiguration(
+      fontSize: 18,                      // subtitle appearance (see below)
+      backgroundColor: Colors.black54,
+    ),
     controlsTimeoutSeconds: 4,           // 0 = never auto-hide
     showBufferingIndicator: true,
     showTitle: true,                     // title in the top bar
@@ -273,6 +277,7 @@ CustomPlayerController(
 | `aspectRatio` | `null` | Forces canvas ratio; `null` = stream native |
 | `initialVideoFit` | `VideoFit.contain` | Initial scaling: `contain` / `cover` / `fill` |
 | `accentColor` | `Color(0xFFE50914)` | Accent colour for UI elements |
+| `subtitlesConfiguration` | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance — see [Subtitle styling](#subtitle-styling) |
 | `controlsTimeoutSeconds` | `4` | Seconds of inactivity before auto-hide |
 | `showBufferingIndicator` | `true` | Show spinner while buffering |
 | `showTitle` | `true` | Show the source title in the top bar |
@@ -281,6 +286,42 @@ CustomPlayerController(
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
 | `onPositionChanged` | `null` | Throttled (~1/sec) position callback — ideal for resume tracking |
+
+---
+
+## Subtitle styling
+
+Subtitle appearance is configured with better_player's
+`BetterPlayerSubtitlesConfiguration` (re-exported by `mk_player`), passed once
+at construction time:
+
+```dart
+PlayerConfig(
+  subtitlesConfiguration: BetterPlayerSubtitlesConfiguration(
+    fontSize: 14,                        // logical pixels
+    fontColor: Colors.white,
+    fontFamily: 'Roboto',
+    backgroundColor: Colors.transparent, // box behind the text
+    outlineEnabled: true,                // stroke around glyphs
+    outlineColor: Colors.black,
+    outlineSize: 2.0,
+    bottomPadding: 20,                   // distance from the bottom edge
+    leftPadding: 8,
+    rightPadding: 8,
+    alignment: Alignment.center,
+  ),
+)
+```
+
+Common presets:
+
+```dart
+// YouTube-style: text on a semi-transparent black band
+BetterPlayerSubtitlesConfiguration(backgroundColor: Colors.black54, outlineEnabled: false)
+
+// Classic TV captions: yellow text with a black outline
+BetterPlayerSubtitlesConfiguration(fontColor: Colors.yellow)
+```
 
 ---
 

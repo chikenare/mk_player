@@ -25,5 +25,6 @@ export 'package:better_player_plus/better_player_plus.dart'
     show
         BetterPlayerAsmsAudioTrack,
         BetterPlayerAsmsTrack,
+        BetterPlayerSubtitlesConfiguration,
         BetterPlayerSubtitlesSource,
         BetterPlayerSubtitlesSourceType;

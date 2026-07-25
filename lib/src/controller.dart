@@ -238,6 +238,7 @@ class CustomPlayerController extends ChangeNotifier {
         // We render our own controls overlay and manage fullscreen ourselves.
         controlsConfiguration:
             const BetterPlayerControlsConfiguration(showControls: false),
+        subtitlesConfiguration: config.subtitlesConfiguration,
         handleLifecycle: false,
         autoDispose: false,
         // false → better_player's internal AspectRatio collapses to our

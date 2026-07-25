@@ -1,3 +1,5 @@
+import 'package:better_player_plus/better_player_plus.dart'
+    show BetterPlayerSubtitlesConfiguration;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
 
@@ -92,6 +94,18 @@ class PlayerConfig {
   /// Accent colour used for the progress bar thumb and selection highlights.
   final Color accentColor;
 
+  /// Visual style of the subtitles, passed straight through to
+  /// better_player's subtitle drawer: font size/colour/family, outline,
+  /// background colour, paddings and alignment.
+  ///
+  /// ```dart
+  /// subtitlesConfiguration: BetterPlayerSubtitlesConfiguration(
+  ///   fontSize: 18,
+  ///   backgroundColor: Colors.black54,
+  /// )
+  /// ```
+  final BetterPlayerSubtitlesConfiguration subtitlesConfiguration;
+
   /// Aspect ratio enforced on the video canvas. Null = use the stream's native
   /// ratio (recommended for adaptive streams).
   final double? aspectRatio;
@@ -155,6 +169,7 @@ class PlayerConfig {
     this.showLockButton = true,
     this.showVolumeControl,
     this.accentColor = const Color(0xFFE50914),
+    this.subtitlesConfiguration = const BetterPlayerSubtitlesConfiguration(),
     this.aspectRatio,
     this.initialVideoFit = VideoFit.contain,
     this.autoOrientation = false,
@@ -184,6 +199,7 @@ class PlayerConfig {
     bool? showLockButton,
     bool? showVolumeControl,
     Color? accentColor,
+    BetterPlayerSubtitlesConfiguration? subtitlesConfiguration,
     double? aspectRatio,
     VideoFit? initialVideoFit,
     bool? autoOrientation,
@@ -215,6 +231,8 @@ class PlayerConfig {
       showLockButton: showLockButton ?? this.showLockButton,
       showVolumeControl: showVolumeControl ?? this.showVolumeControl,
       accentColor: accentColor ?? this.accentColor,
+      subtitlesConfiguration:
+          subtitlesConfiguration ?? this.subtitlesConfiguration,
       aspectRatio: aspectRatio ?? this.aspectRatio,
       initialVideoFit: initialVideoFit ?? this.initialVideoFit,
       autoOrientation: autoOrientation ?? this.autoOrientation,

@@ -257,4 +257,5 @@ PlayerView(
 | `controlsTimeoutSeconds`        | `4`              | Seconds before controls auto-hide                 |
 | `showBufferingIndicator`        | `true`           | Show spinner while buffering                      |
 | `accentColor`                   | `Color(0xFFE50914)` | Progress bar + UI accent                       |
+| `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
