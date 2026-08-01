@@ -2,6 +2,7 @@ import 'package:better_player_plus/better_player_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../controller.dart';
+import '../models/player_config.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry points — focused sheets (Netflix/Apple TV+ style)
@@ -67,10 +68,14 @@ Future<void> showAudioSheet(
   );
 }
 
+/// [config] defaults to the controller's own configuration; pass the one the
+/// view was built with when it overrides it (e.g. host actions whose labels are
+/// resolved from a [BuildContext]).
 Future<void> showSubtitleSheet(
   BuildContext context,
-  CustomPlayerController controller,
-) {
+  CustomPlayerController controller, {
+  PlayerConfig? config,
+}) {
   return _show(
     context,
     _SheetScaffold(
@@ -80,28 +85,46 @@ Future<void> showSubtitleSheet(
         builder: (ctx, _) {
           final sources = controller.subtitleSources;
           final selected = controller.selectedSubtitle;
-          final accent = controller.config.accentColor;
-
-          if (!controller.hasSubtitles) {
-            return const _EmptyHint('No subtitles available');
-          }
+          final cfg = config ?? controller.config;
+          final accent = cfg.accentColor;
+          final actions = cfg.subtitleActions;
 
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (var i = 0; i < sources.length; i++)
-                _TrackTile(
-                  label: _subtitleLabel(sources[i], i),
-                  icon: sources[i].type == BetterPlayerSubtitlesSourceType.none
-                      ? Icons.subtitles_off_rounded
-                      : Icons.closed_caption_rounded,
-                  isSelected: sources[i] == selected,
-                  accentColor: accent,
-                  onTap: () {
-                    controller.setSubtitle(sources[i]);
-                    Navigator.of(ctx).pop();
-                  },
-                ),
+              if (!controller.hasSubtitles)
+                const _EmptyHint('No subtitles available')
+              else
+                for (var i = 0; i < sources.length; i++)
+                  _TrackTile(
+                    label: _subtitleLabel(sources[i], i),
+                    icon:
+                        sources[i].type == BetterPlayerSubtitlesSourceType.none
+                            ? Icons.subtitles_off_rounded
+                            : Icons.closed_caption_rounded,
+                    isSelected: sources[i] == selected,
+                    accentColor: accent,
+                    onTap: () {
+                      controller.setSubtitle(sources[i]);
+                      Navigator.of(ctx).pop();
+                    },
+                  ),
+              // Host-app entries (e.g. "search subtitles online"). The sheet is
+              // dismissed first so the callback can safely push its own route.
+              if (actions.isNotEmpty) ...[
+                const _SheetDivider(),
+                for (final action in actions)
+                  _TrackTile(
+                    label: action.label,
+                    icon: action.icon,
+                    isSelected: false,
+                    accentColor: accent,
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      action.onTap(context);
+                    },
+                  ),
+              ],
             ],
           );
         },
@@ -297,6 +320,22 @@ class _TrackTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Divider between the track list and the host-app actions
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SheetDivider extends StatelessWidget {
+  const _SheetDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      child: Divider(height: 1, thickness: 1, color: Colors.white12),
     );
   }
 }

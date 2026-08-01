@@ -887,8 +887,13 @@ class _BottomBarState extends State<_BottomBar> {
             // rebuilding it ~3×/second along with the progress bar.
             ListenableSelector<(bool, bool, double)>(
               listenable: ctrl,
-              selector: () =>
-                  (ctrl.audioTracks.length > 1, ctrl.hasSubtitles, ctrl.speed),
+              selector: () => (
+                ctrl.audioTracks.length > 1,
+                // Host actions (e.g. "search subtitles online") must stay
+                // reachable even when the media carries no subtitle track.
+                ctrl.hasSubtitles || cfg.subtitleActions.isNotEmpty,
+                ctrl.speed,
+              ),
               builder: (_, value) {
                 final (showAudio, showSubs, speed) = value;
                 return Padding(
@@ -918,7 +923,7 @@ class _BottomBarState extends State<_BottomBar> {
                           label: 'Subtitles',
                           onTap: () {
                             widget.onActivity();
-                            showSubtitleSheet(context, ctrl);
+                            showSubtitleSheet(context, ctrl, config: cfg);
                           },
                         ),
                     ],

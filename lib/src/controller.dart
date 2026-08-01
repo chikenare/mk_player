@@ -6,6 +6,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'dash/dash_manifest.dart';
 import 'dash/dash_side_loader.dart';
+import 'models/external_subtitle.dart';
 import 'models/player_config.dart';
 import 'models/player_source.dart';
 import 'models/storyboard.dart';
@@ -367,15 +368,8 @@ class CustomPlayerController extends ChangeNotifier {
   }
 
   BetterPlayerDataSource _buildDataSource(PlayerSource source) {
-    final subtitles = source.externalSubtitles
-        .map(
-          (s) => BetterPlayerSubtitlesSource(
-            type: BetterPlayerSubtitlesSourceType.network,
-            name: s.title ?? s.language?.toUpperCase() ?? 'Subtitle',
-            urls: [s.uri],
-          ),
-        )
-        .toList();
+    final subtitles =
+        source.externalSubtitles.map(_subtitleSourceOf).toList();
 
     final buffering = BetterPlayerBufferingConfiguration(
       minBufferMs: config.minBufferMs,
@@ -394,6 +388,21 @@ class CustomPlayerController extends ChangeNotifier {
       liveStream: source.isLive,
       videoFormat: _videoFormatOf(source),
       bufferingConfiguration: buffering,
+    );
+  }
+
+  /// Maps an [ExternalSubtitle] onto a better_player source. Local paths are
+  /// read from disk (`file`) instead of being requested over HTTP, which is
+  /// what host apps need for subtitles downloaded to storage.
+  BetterPlayerSubtitlesSource _subtitleSourceOf(ExternalSubtitle s) {
+    return BetterPlayerSubtitlesSource(
+      type: s.isLocal
+          ? BetterPlayerSubtitlesSourceType.file
+          : BetterPlayerSubtitlesSourceType.network,
+      name: s.title ?? s.language?.toUpperCase() ?? 'Subtitle',
+      urls: [s.uri],
+      headers: s.isLocal || s.headers.isEmpty ? null : s.headers,
+      selectedByDefault: s.selectedByDefault,
     );
   }
 
@@ -518,6 +527,46 @@ class CustomPlayerController extends ChangeNotifier {
     }
     await betterPlayerController.setupSubtitleSource(source);
     _notify();
+  }
+
+  /// Adds a subtitle track to the running player and returns the created
+  /// source, so the host app can select or remove it later.
+  ///
+  /// For tracks that only exist once playback has started — a subtitle the user
+  /// just downloaded, or one picked from the device. Tracks known up front
+  /// belong in [PlayerSource.externalSubtitles].
+  ///
+  /// The new entry is inserted before the "Off" entry (which better_player
+  /// keeps last) and selected right away unless [select] is false.
+  Future<BetterPlayerSubtitlesSource> addExternalSubtitle(
+    ExternalSubtitle subtitle, {
+    bool select = true,
+  }) async {
+    final source = _subtitleSourceOf(subtitle);
+    final sources = betterPlayerController.betterPlayerSubtitlesSourceList;
+    final noneIndex = sources
+        .indexWhere((s) => s.type == BetterPlayerSubtitlesSourceType.none);
+    sources.insert(noneIndex >= 0 ? noneIndex : sources.length, source);
+    if (select) {
+      await setSubtitle(source);
+    } else {
+      _notify();
+    }
+    return source;
+  }
+
+  /// Removes a previously added subtitle track. Falls back to "Off" when the
+  /// removed track was the one being displayed.
+  Future<void> removeSubtitle(BetterPlayerSubtitlesSource source) async {
+    if (_disposed) return;
+    final sources = betterPlayerController.betterPlayerSubtitlesSourceList;
+    if (!sources.remove(source)) return;
+    _lazyDashSubtitles.remove(source);
+    if (selectedSubtitle == source) {
+      await disableSubtitles();
+    } else {
+      _notify();
+    }
   }
 
   /// Disables subtitles by selecting the "off" source, if present.

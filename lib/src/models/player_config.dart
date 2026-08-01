@@ -3,6 +3,7 @@ import 'package:better_player_plus/better_player_plus.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
 
+import 'player_action.dart';
 import 'video_fit.dart';
 
 /// Immutable configuration for [CustomPlayerController] and [PlayerView].
@@ -71,8 +72,23 @@ class PlayerConfig {
 
   // ── UI ────────────────────────────────────────────────────────────────────
 
+  /// Render the built-in controls overlay.
+  ///
+  /// Set to `false` to keep only the video surface (plus poster, buffering and
+  /// error overlays) and stack your own controls on top of [PlayerView] —
+  /// needed on platforms the built-in touch overlay does not serve, such as
+  /// Android TV with D-pad navigation.
+  final bool showControls;
+
   /// Seconds of inactivity before controls auto-hide. Set to 0 to disable.
   final int controlsTimeoutSeconds;
+
+  /// Extra entries appended to the subtitle sheet, below the track list.
+  ///
+  /// The hook for host-app subtitle flows (downloading from an online
+  /// provider, picking a local file, …). Shown even when the media has no
+  /// subtitle tracks at all.
+  final List<PlayerSheetAction> subtitleActions;
 
   /// Show a buffer/loading indicator while the player is buffering.
   final bool showBufferingIndicator;
@@ -163,7 +179,9 @@ class PlayerConfig {
     this.autoRetryMaxAttempts = 3,
     this.autoRetryBaseDelay = const Duration(seconds: 2),
     this.useWakelock = true,
+    this.showControls = true,
     this.controlsTimeoutSeconds = 4,
+    this.subtitleActions = const [],
     this.showBufferingIndicator = true,
     this.showTitle = true,
     this.showLockButton = true,
@@ -193,7 +211,9 @@ class PlayerConfig {
     int? autoRetryMaxAttempts,
     Duration? autoRetryBaseDelay,
     bool? useWakelock,
+    bool? showControls,
     int? controlsTimeoutSeconds,
+    List<PlayerSheetAction>? subtitleActions,
     bool? showBufferingIndicator,
     bool? showTitle,
     bool? showLockButton,
@@ -223,8 +243,10 @@ class PlayerConfig {
       autoRetryMaxAttempts: autoRetryMaxAttempts ?? this.autoRetryMaxAttempts,
       autoRetryBaseDelay: autoRetryBaseDelay ?? this.autoRetryBaseDelay,
       useWakelock: useWakelock ?? this.useWakelock,
+      showControls: showControls ?? this.showControls,
       controlsTimeoutSeconds:
           controlsTimeoutSeconds ?? this.controlsTimeoutSeconds,
+      subtitleActions: subtitleActions ?? this.subtitleActions,
       showBufferingIndicator:
           showBufferingIndicator ?? this.showBufferingIndicator,
       showTitle: showTitle ?? this.showTitle,

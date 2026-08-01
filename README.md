@@ -244,10 +244,18 @@ CustomPlayerController(
       fontSize: 18,                      // subtitle appearance (see below)
       backgroundColor: Colors.black54,
     ),
+    showControls: true,                  // false = video only, bring your own UI
     controlsTimeoutSeconds: 4,           // 0 = never auto-hide
     showBufferingIndicator: true,
     showTitle: true,                     // title in the top bar
     showLockButton: true,                // lock-screen button (top-right)
+    subtitleActions: [                   // extra entries in the subtitle sheet
+      PlayerSheetAction(
+        icon: Icons.search_rounded,
+        label: 'Search online…',
+        onTap: (context) => showMySubtitleSearch(context),
+      ),
+    ],
 
     // ── Callbacks
     onCompleted: () => _playNext(),
@@ -278,7 +286,9 @@ CustomPlayerController(
 | `initialVideoFit` | `VideoFit.contain` | Initial scaling: `contain` / `cover` / `fill` |
 | `accentColor` | `Color(0xFFE50914)` | Accent colour for UI elements |
 | `subtitlesConfiguration` | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance — see [Subtitle styling](#subtitle-styling) |
+| `showControls` | `true` | Render the built-in controls overlay. `false` leaves only the video surface (plus poster/buffering/error) so the host can stack its own UI — e.g. a D-pad-navigable layout on Android TV |
 | `controlsTimeoutSeconds` | `4` | Seconds of inactivity before auto-hide |
+| `subtitleActions` | `[]` | Extra `PlayerSheetAction` entries appended to the subtitle sheet — see [Subtitles](#subtitles) |
 | `showBufferingIndicator` | `true` | Show spinner while buffering |
 | `showTitle` | `true` | Show the source title in the top bar |
 | `showLockButton` | `true` | Show the lock-screen button (top-right) |
@@ -402,6 +412,15 @@ await controller.setSubtitle(subtitles.first);
 // Turn off subtitles
 await controller.disableSubtitles();
 
+// Add a track that only exists mid-playback (just downloaded, picked from
+// storage…) — inserted before "Off" and selected unless select: false
+final added = await controller.addExternalSubtitle(
+  ExternalSubtitle(uri: '/data/user/0/app/files/subs/es.srt', title: 'Español'),
+);
+
+// And remove it again (falls back to "Off" if it was the selected one)
+await controller.removeSubtitle(added);
+
 // Force a video quality / bitrate
 controller.setVideoTrack(videos[2]);
 ```
@@ -497,6 +516,26 @@ For sources opened with `isLive: true`, a red **LIVE** badge replaces the
 duration and the scrubber is disabled. Liveness is never auto-detected — set
 the flag explicitly on the `PlayerSource`.
 
+### Bringing your own controls
+
+The built-in overlay is touch-first. Where that does not fit — Android TV with
+a D-pad, a kiosk layout, an embedded preview — set `showControls: false` and
+stack your own UI on top. `PlayerView` still renders the video surface, poster,
+buffering spinner and error overlay; everything else is yours, driven by the
+same `CustomPlayerController`:
+
+```dart
+Stack(
+  children: [
+    PlayerView(
+      controller: _controller,
+      config: _controller.config.copyWith(showControls: false),
+    ),
+    MyTvControls(controller: _controller), // your focusable widgets
+  ],
+)
+```
+
 ---
 
 ## Storyboard thumbnail scrubber
@@ -563,23 +602,70 @@ controller.open(
         uri: '/storage/emulated/0/subs/es.srt', // local file also works
         title: 'Español',
         language: 'es',
+        selectedByDefault: true,  // start with this one already on
       ),
     ],
   ),
 );
 ```
 
+Any `uri` that does not start with `http://` or `https://` is read from disk;
+network ones are downloaded. Subtitles never inherit the video's `headers` —
+they usually live on a different host — so pass them per track when the
+endpoint needs auth:
+
+```dart
+ExternalSubtitle(
+  uri: 'https://cdn.example.com/subs/en.vtt',
+  title: 'English',
+  headers: {'Authorization': 'Bearer $token'},
+)
+```
+
+Nothing is displayed until a track is selected: set `selectedByDefault: true`
+on one of them (or call `setSubtitle`) if subtitles should be on from the
+start.
+
 You can also build the list from a `label → uri` map:
 
 ```dart
-externalSubtitles: ExternalSubtitle.fromMap({
-  'English': 'https://cdn.example.com/en.vtt',
-  'Español': 'https://cdn.example.com/es.vtt',
-}),
+externalSubtitles: ExternalSubtitle.fromMap(
+  {
+    'English': 'https://cdn.example.com/en.vtt',
+    'Español': 'https://cdn.example.com/es.vtt',
+  },
+  selectFirst: true, // enable the first entry on open
+),
 ```
 
 > The subtitle list includes an "off" entry; `controller.hasSubtitles` reports
 > whether there is at least one real, selectable subtitle to choose from.
+
+### Host actions in the subtitle sheet
+
+`PlayerConfig.subtitleActions` appends your own entries below the track list —
+the hook for app-specific flows such as downloading from an online provider.
+They are shown even when the media has no subtitle tracks, and the sheet closes
+before the callback runs, so it is safe to push a route or open another sheet:
+
+```dart
+PlayerConfig(
+  subtitleActions: [
+    PlayerSheetAction(
+      icon: Icons.search_rounded,
+      label: 'Search subtitles online…',
+      onTap: (context) async {
+        final file = await showMySubtitleBrowser(context); // your UI
+        if (file != null) {
+          await controller.addExternalSubtitle(
+            ExternalSubtitle(uri: file.path, title: file.language),
+          );
+        }
+      },
+    ),
+  ],
+)
+```
 
 ---
 

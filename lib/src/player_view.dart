@@ -222,19 +222,20 @@ class _VideoCanvas extends StatelessWidget {
             // which flip rarely. A ListenableSelector keeps the overlay stable in
             // between, eliminating the ~3×/second full-tree rebuild that was
             // competing with video compositing on the UI thread.
-            ListenableSelector<bool>(
-              listenable: controller,
-              selector: () => controller.hasError || controller.pipActive,
-              builder: (_, hidden) {
-                if (hidden) return const SizedBox.shrink();
-                return PlayerControlsOverlay(
-                  controller: controller,
-                  config: config,
-                  isFullscreen: isFullscreen,
-                  onToggleFullscreen: onToggleFullscreen,
-                );
-              },
-            ),
+            if (config.showControls)
+              ListenableSelector<bool>(
+                listenable: controller,
+                selector: () => controller.hasError || controller.pipActive,
+                builder: (_, hidden) {
+                  if (hidden) return const SizedBox.shrink();
+                  return PlayerControlsOverlay(
+                    controller: controller,
+                    config: config,
+                    isFullscreen: isFullscreen,
+                    onToggleFullscreen: onToggleFullscreen,
+                  );
+                },
+              ),
           ],
         ),
       ),

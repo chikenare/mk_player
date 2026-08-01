@@ -36,6 +36,9 @@
 /// ```
 class ExternalSubtitle {
   /// HTTP(S) URL or absolute file path to the subtitle file.
+  ///
+  /// Anything that does not start with `http://` or `https://` is treated as a
+  /// local file path and read from disk instead of being downloaded.
   final String uri;
 
   /// Display label shown in the subtitle selector. Falls back to [language]
@@ -45,17 +48,50 @@ class ExternalSubtitle {
   /// Optional language code (e.g. `en`, `es`).
   final String? language;
 
+  /// HTTP headers sent when downloading [uri]. Ignored for local files.
+  ///
+  /// Not inherited from the video source: subtitles frequently live on a
+  /// different host, where the video's `Authorization`/`Referer` headers would
+  /// be rejected. Pass them explicitly when the subtitle endpoint needs auth.
+  final Map<String, String> headers;
+
+  /// Select this track as soon as the source is opened.
+  ///
+  /// When no external subtitle sets this, the player starts with subtitles off
+  /// (the "Off" entry) and the user picks one from the subtitle sheet.
+  final bool selectedByDefault;
+
   const ExternalSubtitle({
     required this.uri,
     this.title,
     this.language,
+    this.headers = const {},
+    this.selectedByDefault = false,
   });
+
+  /// True when [uri] points at a local file rather than a network resource.
+  bool get isLocal =>
+      !uri.startsWith('http://') && !uri.startsWith('https://');
 
   /// Builds a list from a `label → uri` map, e.g.
   /// `{ 'English': 'https://…/en.vtt', 'Español': 'https://…/es.vtt' }`.
-  static List<ExternalSubtitle> fromMap(Map<String, String> labelToUri) {
-    return labelToUri.entries
-        .map((e) => ExternalSubtitle(uri: e.value, title: e.key))
+  ///
+  /// [headers] are applied to every entry; set [selectFirst] to start playback
+  /// with the first track already enabled.
+  static List<ExternalSubtitle> fromMap(
+    Map<String, String> labelToUri, {
+    Map<String, String> headers = const {},
+    bool selectFirst = false,
+  }) {
+    return labelToUri.entries.indexed
+        .map(
+          (e) => ExternalSubtitle(
+            uri: e.$2.value,
+            title: e.$2.key,
+            headers: headers,
+            selectedByDefault: selectFirst && e.$1 == 0,
+          ),
+        )
         .toList();
   }
 
@@ -100,8 +136,9 @@ class ExternalSubtitle {
       other is ExternalSubtitle &&
       other.uri == uri &&
       other.title == title &&
-      other.language == language;
+      other.language == language &&
+      other.selectedByDefault == selectedByDefault;
 
   @override
-  int get hashCode => Object.hash(uri, title, language);
+  int get hashCode => Object.hash(uri, title, language, selectedByDefault);
 }
