@@ -26,12 +26,16 @@ class PlayerControlsOverlay extends StatefulWidget {
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
 
+  /// Opens Picture-in-Picture. Null hides the PiP button entirely.
+  final VoidCallback? onEnterPip;
+
   const PlayerControlsOverlay({
     super.key,
     required this.controller,
     required this.config,
     this.isFullscreen = false,
     this.onToggleFullscreen,
+    this.onEnterPip,
   });
 
   @override
@@ -424,6 +428,7 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             isFullscreen: widget.isFullscreen,
             onToggleFullscreen: widget.onToggleFullscreen,
             onLock: cfg.showLockButton ? _lock : null,
+            onEnterPip: cfg.showPipButton ? widget.onEnterPip : null,
             // Aspect-ratio button: desktop/web only (mobile uses pinch).
             onCycleFit: isDesktopOrWeb
                 ? () {
@@ -554,6 +559,7 @@ class _TopBar extends StatelessWidget {
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
   final VoidCallback? onLock;
+  final VoidCallback? onEnterPip;
 
   final VoidCallback? onCycleFit;
 
@@ -563,6 +569,7 @@ class _TopBar extends StatelessWidget {
     required this.isFullscreen,
     required this.onToggleFullscreen,
     required this.onLock,
+    required this.onEnterPip,
     required this.onCycleFit,
   });
 
@@ -612,6 +619,22 @@ class _TopBar extends StatelessWidget {
                 size: 22,
                 tooltip: 'Aspect ratio',
                 onPressed: onCycleFit,
+              ),
+
+            // Picture-in-Picture — only once the native side has confirmed the
+            // device supports it (resolved shortly after the first frame).
+            if (onEnterPip != null)
+              ListenableSelector<bool>(
+                listenable: controller,
+                selector: () => controller.pipSupported,
+                builder: (_, supported) => supported
+                    ? _IconBtn(
+                        icon: Icons.picture_in_picture_alt_rounded,
+                        size: 22,
+                        tooltip: 'Picture-in-Picture',
+                        onPressed: onEnterPip,
+                      )
+                    : const SizedBox.shrink(),
               ),
 
             // Lock screen

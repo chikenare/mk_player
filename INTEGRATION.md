@@ -202,25 +202,55 @@ ListenableBuilder(
 
 ## 9. Picture-in-Picture
 
-`mk_player` exposes **lifecycle hooks** so the host application can integrate
-its chosen PiP mechanism and the player UI reacts correctly.
-
-### Android (`floating` package example)
+The controls overlay ships a **PiP button** (top bar, next to fullscreen). It
+appears on Android and iOS once the native player confirms the device supports
+PiP, and is hidden everywhere else. Turn it off with:
 
 ```dart
-// Enter PiP (call from your Activity or using the `floating` package)
-await Floating().enable(ImmediatePiP());
-_controller.notifyPipEntered();   // hides controls overlay
-
-// When PiP window is closed:
-_controller.notifyPipExited();
+PlayerConfig(showPipButton: false)
 ```
 
-### iOS (AVPictureInPictureController)
+### Android — required manifest flags
 
-Wire `AVPictureInPictureController` inside a `FlutterPlatformView` or via a
-method channel. Call `notifyPipEntered()` / `notifyPipExited()` from the
-channel callback.
+PiP belongs to the host activity, so add to your app's `AndroidManifest.xml`:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    android:supportsPictureInPicture="true"
+    android:resizeableActivity="true"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+    ... >
+```
+
+Android miniaturises the whole activity, so `PlayerView` switches to fullscreen
+before opening PiP; after the PiP window closes the player remains fullscreen.
+
+### iOS
+
+Enable the *Audio, AirPlay, and Picture in Picture* background mode
+(`Signing & Capabilities → Background Modes`) in your Runner target.
+
+### Programmatic control
+
+```dart
+await _controller.enterPip();  // open
+await _controller.exitPip();   // close
+_controller.pipSupported;      // resolved natively after the first frame
+_controller.pipActive;         // true while the PiP window is open
+```
+
+### Custom PiP mechanisms
+
+Using something else (e.g. the `floating` package)? Keep the UI in sync:
+
+```dart
+_controller.notifyPipEntered();   // hides controls overlay
+_controller.notifyPipExited();    // restores controls overlay
+```
+
+OS-driven changes are mirrored automatically from the native
+`pipStart`/`pipStop` events.
 
 ---
 

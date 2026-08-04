@@ -138,6 +138,12 @@ Future<void> _show(BuildContext context, Widget sheet) {
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
+    // Explicitly off: _SheetScaffold draws its own handle inside the rounded
+    // card. Left to the default this follows the *host app's*
+    // BottomSheetThemeData, and an app that enables drag handles globally gets
+    // a second one — floating above the card, because our background is
+    // transparent and Material insets the content by 48px to make room for it.
+    showDragHandle: false,
     builder: (_) => sheet,
   );
 }

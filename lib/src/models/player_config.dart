@@ -100,6 +100,13 @@ class PlayerConfig {
   /// When locked, all gestures and controls are disabled until unlocked.
   final bool showLockButton;
 
+  /// Whether to show the Picture-in-Picture button in the top controls bar.
+  ///
+  /// The button only appears when the platform actually supports PiP, i.e. on
+  /// Android (with `android:supportsPictureInPicture="true"` declared on the
+  /// host activity) and on iOS. It is never rendered on desktop or web.
+  final bool showPipButton;
+
   /// Whether to show the inline volume control in the bottom bar.
   ///
   /// `null` (default) = automatic: shown on desktop/web (no hardware volume
@@ -185,6 +192,7 @@ class PlayerConfig {
     this.showBufferingIndicator = true,
     this.showTitle = true,
     this.showLockButton = true,
+    this.showPipButton = true,
     this.showVolumeControl,
     this.accentColor = const Color(0xFFE50914),
     this.subtitlesConfiguration = const BetterPlayerSubtitlesConfiguration(),
@@ -217,6 +225,7 @@ class PlayerConfig {
     bool? showBufferingIndicator,
     bool? showTitle,
     bool? showLockButton,
+    bool? showPipButton,
     bool? showVolumeControl,
     Color? accentColor,
     BetterPlayerSubtitlesConfiguration? subtitlesConfiguration,
@@ -251,6 +260,7 @@ class PlayerConfig {
           showBufferingIndicator ?? this.showBufferingIndicator,
       showTitle: showTitle ?? this.showTitle,
       showLockButton: showLockButton ?? this.showLockButton,
+      showPipButton: showPipButton ?? this.showPipButton,
       showVolumeControl: showVolumeControl ?? this.showVolumeControl,
       accentColor: accentColor ?? this.accentColor,
       subtitlesConfiguration:

@@ -146,7 +146,7 @@ class _PlayerViewState extends State<PlayerView> {
 // The [BetterPlayer] surface is a stable, direct child of the Stack — never
 // wrapped in a ListenableBuilder — so it is not rebuilt on every position tick.
 // Fit changes are handled internally by better_player via setOverriddenFit.
-class _VideoCanvas extends StatelessWidget {
+class _VideoCanvas extends StatefulWidget {
   final CustomPlayerController controller;
   final PlayerConfig config;
   final bool isFullscreen;
@@ -160,6 +160,36 @@ class _VideoCanvas extends StatelessWidget {
   });
 
   @override
+  State<_VideoCanvas> createState() => _VideoCanvasState();
+}
+
+class _VideoCanvasState extends State<_VideoCanvas> {
+  // iOS needs the on-screen rectangle of the video surface to open PiP. One key
+  // per canvas instance — the embedded player and the fullscreen route each
+  // build their own [BetterPlayer], and a shared GlobalKey would collide.
+  final GlobalKey _surfaceKey = GlobalKey();
+
+  CustomPlayerController get controller => widget.controller;
+  PlayerConfig get config => widget.config;
+
+  Future<void> _enterPip() async {
+    // Android miniaturises the *whole activity*, so anything the page shows
+    // around the player would ride along into the PiP window — go fullscreen
+    // first, leaving only the video on screen. iOS composits the video layer
+    // on its own and needs no such trick.
+    if (isAndroidPlatform &&
+        !widget.isFullscreen &&
+        widget.onToggleFullscreen != null) {
+      widget.onToggleFullscreen!();
+      // The fullscreen route fades in over ~200ms; entering PiP before it has
+      // settled captures the old frame in the PiP window.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+    }
+    await controller.enterPip(playerKey: _surfaceKey);
+  }
+
+  @override
   Widget build(BuildContext context) {
     Widget canvas = ClipRect(
       child: ColoredBox(
@@ -168,7 +198,10 @@ class _VideoCanvas extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             // ── 1. Video surface ───────────────────────────────────────────
-            BetterPlayer(controller: controller.betterPlayerController),
+            BetterPlayer(
+              key: _surfaceKey,
+              controller: controller.betterPlayerController,
+            ),
 
             // ── 1.5. Poster — fades out on first decoded frame ────────────
             // Selector: rebuilds only when the (url, visible) pair flips — not
@@ -231,8 +264,9 @@ class _VideoCanvas extends StatelessWidget {
                   return PlayerControlsOverlay(
                     controller: controller,
                     config: config,
-                    isFullscreen: isFullscreen,
-                    onToggleFullscreen: onToggleFullscreen,
+                    isFullscreen: widget.isFullscreen,
+                    onToggleFullscreen: widget.onToggleFullscreen,
+                    onEnterPip: _enterPip,
                   );
                 },
               ),

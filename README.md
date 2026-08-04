@@ -18,7 +18,7 @@ A self-contained, highly reusable Flutter video player built on [better_player_p
 | **Fullscreen** | Landscape orientation lock + immersive SystemChrome |
 | **Wakelock** | Screen stays on during playback, released on pause/error/dispose |
 | **Error UI** | User-friendly overlay with Retry button and automatic 30 s timeout |
-| **PiP hooks** | Architecture hooks for iOS & Android Picture-in-Picture |
+| **PiP** | Built-in Picture-in-Picture button (Android & iOS) plus lifecycle hooks |
 | **State** | `ChangeNotifier` — no third-party state library required |
 
 ---
@@ -249,6 +249,7 @@ CustomPlayerController(
     showBufferingIndicator: true,
     showTitle: true,                     // title in the top bar
     showLockButton: true,                // lock-screen button (top-right)
+    showPipButton: true,                 // Picture-in-Picture button (mobile)
     subtitleActions: [                   // extra entries in the subtitle sheet
       PlayerSheetAction(
         icon: Icons.search_rounded,
@@ -292,6 +293,7 @@ CustomPlayerController(
 | `showBufferingIndicator` | `true` | Show spinner while buffering |
 | `showTitle` | `true` | Show the source title in the top bar |
 | `showLockButton` | `true` | Show the lock-screen button (top-right) |
+| `showPipButton` | `true` | Show the Picture-in-Picture button — Android/iOS only, and only when the device supports PiP — see [Picture-in-Picture](#picture-in-picture) |
 | `showVolumeControl` | `null` | Inline volume control; `null` = auto (hidden on mobile, where the OS volume keys are used), or force `true`/`false` |
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
@@ -682,45 +684,68 @@ orientation and system UI.
 
 ## Picture-in-Picture
 
-The package exposes lifecycle hooks. Wire your platform-specific PiP
-implementation and call these two methods:
+A PiP button is rendered in the top controls bar on Android and iOS, as soon as
+the native side confirms the device supports it. No wiring is needed beyond the
+platform setup below; hide it with `showPipButton: false`.
 
 ```dart
-// When the OS enters PiP (e.g. user presses the PiP button)
-_controller.notifyPipEntered(); // hides controls overlay
+PlayerConfig(showPipButton: true) // default
+```
 
-// When the PiP window is closed
+### Android setup
+
+PiP is a property of the **host activity**, so it must be declared in your app's
+`android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    android:supportsPictureInPicture="true"
+    android:resizeableActivity="true"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+    ... >
+```
+
+Without `supportsPictureInPicture` the button still appears (the device *does*
+support PiP) but entering fails with a log line explaining exactly this.
+
+Android puts the **whole activity** into the PiP window, so `PlayerView` enters
+its own fullscreen first — otherwise the rest of your page would be miniaturised
+along with the video. When the PiP window closes the player stays fullscreen;
+the user leaves it with the exit-fullscreen button or the back gesture.
+
+### iOS setup
+
+Enable the **Audio, AirPlay, and Picture in Picture** background mode in Xcode
+(`Signing & Capabilities → Background Modes`), which adds to `Info.plist`:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+  <string>audio</string>
+</array>
+```
+
+### Driving PiP yourself
+
+```dart
+await _controller.enterPip();   // opens the PiP window
+await _controller.exitPip();    // closes it (Android sends the task to the back)
+_controller.pipSupported        // native answer, false until the first frame
+_controller.pipActive           // true while the PiP window is open
+```
+
+If you drive PiP with your own mechanism (e.g. the `floating` package) instead
+of the built-in button, tell the player about it so the controls overlay reacts:
+
+```dart
+_controller.notifyPipEntered(); // hides controls overlay
 _controller.notifyPipExited();  // restores controls overlay
 ```
 
-### Android — `floating` package example
-
-```dart
-import 'package:floating/floating.dart';
-
-final _floating = Floating();
-
-Future<void> _enterPip() async {
-  await _floating.enable(ImmediatePiP());
-  _controller.notifyPipEntered();
-}
-```
-
-Listen for the app lifecycle to detect when PiP closes:
-
-```dart
-@override
-void didChangeAppLifecycleState(AppLifecycleState state) {
-  if (state == AppLifecycleState.resumed) {
-    _controller.notifyPipExited();
-  }
-}
-```
-
-### iOS
-
-Wire `AVPictureInPictureController` through a method channel or platform view.
-Call `notifyPipEntered()` / `notifyPipExited()` from the channel callback.
+OS-initiated PiP changes (closing the window, the system "back to app" button)
+are picked up automatically — the player mirrors the native `pipStart`/`pipStop`
+events.
 
 ---
 

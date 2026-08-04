@@ -12,6 +12,7 @@ import 'models/player_source.dart';
 import 'models/storyboard.dart';
 import 'models/video_fit.dart';
 import 'models/video_format.dart';
+import 'platform.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -210,6 +211,86 @@ class CustomPlayerController extends ChangeNotifier {
 
   bool _pipActive = false;
   bool get pipActive => _pipActive;
+
+  bool _pipSupported = false;
+
+  /// Whether this device can show a Picture-in-Picture window.
+  ///
+  /// Resolved natively once the data source is initialized: false on desktop
+  /// and web, and false on Android when the host activity does not declare
+  /// `android:supportsPictureInPicture="true"`.
+  bool get pipSupported => _pipSupported;
+
+  Future<void> _refreshPipSupport() async {
+    if (_disposed || !isMobilePlatform) return;
+    final player = betterPlayerController.videoPlayerController;
+    if (player == null) return;
+    final supported = (await player.isPictureInPictureSupported()) ?? false;
+    if (_disposed || supported == _pipSupported) return;
+    _pipSupported = supported;
+    _notify();
+  }
+
+  /// Puts the video into a Picture-in-Picture window.
+  ///
+  /// [playerKey] must be the key of the on-screen video surface: iOS needs its
+  /// rectangle to animate the transition. Android ignores it — there the whole
+  /// activity becomes the PiP window, so callers should make the player fill
+  /// the screen first (see [PlayerView], which enters fullscreen for you).
+  ///
+  /// better_player's own `enablePictureInPicture` is deliberately bypassed: it
+  /// drives its internal fullscreen machinery, pushing and popping a route of
+  /// its own that fights with the fullscreen route mk_player manages.
+  Future<void> enterPip({GlobalKey? playerKey}) async {
+    if (_disposed || _pipActive) return;
+    final player = betterPlayerController.videoPlayerController;
+    if (player == null) return;
+    if (!_pipSupported) {
+      await _refreshPipSupport();
+      if (!_pipSupported) return;
+    }
+
+    try {
+      if (isAndroidPlatform) {
+        // Geometry is unused on Android — the activity enters PiP as a whole.
+        await player.enablePictureInPicture(
+            left: 0, top: 0, width: 0, height: 0);
+      } else if (isIOSPlatform) {
+        final box = playerKey?.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null) {
+          debugPrint('[MkPlayer] enterPip: no render box for the player key.');
+          return;
+        }
+        final origin = box.localToGlobal(Offset.zero);
+        await player.enablePictureInPicture(
+          left: origin.dx,
+          top: origin.dy,
+          width: box.size.width,
+          height: box.size.height,
+        );
+      } else {
+        return;
+      }
+    } catch (e) {
+      // The native check only tells us the *device* supports PiP. Android still
+      // throws if the host activity forgot android:supportsPictureInPicture.
+      debugPrint('[MkPlayer] enterPip failed: $e — is '
+          'android:supportsPictureInPicture="true" set on your activity?');
+      return;
+    }
+    notifyPipEntered();
+  }
+
+  /// Closes the Picture-in-Picture window and returns the video to the app.
+  ///
+  /// Note that on Android the platform implementation sends the task to the
+  /// background, so the app is left behind the launcher rather than in front.
+  Future<void> exitPip() async {
+    if (_disposed || !_pipActive) return;
+    await betterPlayerController.videoPlayerController
+        ?.disablePictureInPicture();
+    notifyPipExited();
+  }
 
   void notifyPipEntered() {
     _pipActive = true;
@@ -644,6 +725,9 @@ class CustomPlayerController extends ChangeNotifier {
         _readVideoParams(value);
         _syncFromValue(value);
         _applyStartAt();
+        // PiP support can only be asked of the native player once it has a
+        // texture, i.e. from `initialized` onwards.
+        unawaited(_refreshPipSupport());
         if (!(betterPlayerController.isPlaying() ?? false)) {
           _transition(MkPlayerState.paused);
         }
@@ -685,6 +769,13 @@ class CustomPlayerController extends ChangeNotifier {
       case BetterPlayerEventType.setSpeed:
       case BetterPlayerEventType.setVolume:
         _syncFromValue(value);
+      // The OS can start/stop PiP on its own (home gesture, closing the PiP
+      // window, the system "back to app" button), so mirror it rather than
+      // trusting only our own enterPip/exitPip calls.
+      case BetterPlayerEventType.pipStart:
+        if (!_pipActive) notifyPipEntered();
+      case BetterPlayerEventType.pipStop:
+        if (_pipActive) notifyPipExited();
       default:
         break;
     }
