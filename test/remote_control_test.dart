@@ -359,6 +359,19 @@ void main() {
       expect(find.text('AUDIO'), findsNothing);
       expect(find.text('Search online…'), findsOneWidget);
 
+      // The panel carries its own Material: without one every label inherits
+      // the framework's missing-Material style — yellow double underlines.
+      expect(
+        find.ancestor(
+          of: find.text('SUBTITLES'),
+          matching: find.byType(Material),
+        ),
+        findsWidgets,
+      );
+      final labelStyle =
+          DefaultTextStyle.of(tester.element(find.text('SUBTITLES'))).style;
+      expect(labelStyle.decoration ?? TextDecoration.none, TextDecoration.none);
+
       // Pinned to the right half of the screen, hugging its content.
       final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
       final panel = tester.getRect(find.text('SUBTITLES'));

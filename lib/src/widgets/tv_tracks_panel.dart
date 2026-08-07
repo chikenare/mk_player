@@ -202,18 +202,19 @@ class _TvTracksPanel extends StatelessWidget {
         ),
     ];
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xF2141414),
+    // A Material, not a DecoratedBox: this route is pushed by
+    // showGeneralDialog, which supplies none of its own, and text without a
+    // Material ancestor inherits the framework's "you forgot one" style —
+    // yellow double underlines. It also draws the elevation shadow for us.
+    return Material(
+      type: MaterialType.card,
+      color: const Color(0xF2141414),
+      elevation: 16,
+      shadowColor: Colors.black,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(140),
-            blurRadius: 28,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        side: const BorderSide(color: Colors.white24),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
