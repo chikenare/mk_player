@@ -64,6 +64,17 @@ class PlayerSource {
   /// alongside any subtitles embedded in the media itself.
   final List<ExternalSubtitle> externalSubtitles;
 
+  // ── Telemetry ─────────────────────────────────────────────────────────────
+
+  /// Numeric id of the content being played, as known by your API.
+  ///
+  /// Required for telemetry: a source without a [contentId] is played without
+  /// reporting, even when [PlayerConfig.telemetry] is configured.
+  final int? contentId;
+
+  /// Numeric id of the episode. Null for movies.
+  final int? episodeId;
+
   const PlayerSource.network(
     String this.url, {
     this.headers = const {},
@@ -75,6 +86,8 @@ class PlayerSource {
     this.storyboardUrl,
     this.storyboardHeaders = const {},
     this.externalSubtitles = const [],
+    this.contentId,
+    this.episodeId,
   }) : path = null;
 
   const PlayerSource.file(
@@ -86,6 +99,8 @@ class PlayerSource {
     this.storyboardUrl,
     this.storyboardHeaders = const {},
     this.externalSubtitles = const [],
+    this.contentId,
+    this.episodeId,
   })  : url = null,
         format = null,
         headers = const {};

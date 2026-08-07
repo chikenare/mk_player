@@ -271,7 +271,49 @@ PlayerView(
 
 ---
 
-## 11. Configuration reference
+## 11. Playback telemetry
+
+Configure it once on the controller and give every source its `contentId`; the
+player does the rest (`start` / `progress` / `end` / `error`, on-disk queue,
+retries).
+
+```dart
+_controller = CustomPlayerController(
+  config: PlayerConfig(
+    telemetry: TelemetryConfig(
+      apiBaseUrl: 'https://api.example.com',
+      authToken: sanctumToken,
+      appVersion: packageInfo.version,
+      // Android TV reports as a different device class:
+      deviceType: isAndroidTv ? TelemetryDeviceType.tv : TelemetryDeviceType.android,
+    ),
+  ),
+);
+
+await _controller.open(PlayerSource.network(
+  streamUrl,
+  title: 'Episode 3',
+  contentId: 812,     // required, or the playback is not reported
+  episodeId: 4711,    // null for movies
+));
+```
+
+After a re-login, release the events a `401` held back:
+
+```dart
+_controller.updateTelemetryToken(newToken);
+```
+
+Requires the `INTERNET` permission (already needed for streaming) and nothing
+else — the queue lives in the app support directory via `path_provider`.
+
+See the [Telemetry section of the README](README.md#telemetry) for the payload
+contract, the delivery rules and why `bytesDownloadedDelta` needs a native
+counter to be reported.
+
+---
+
+## 12. Configuration reference
 
 | `PlayerConfig` field            | Default          | Description                                        |
 |---------------------------------|------------------|----------------------------------------------------|
@@ -289,3 +331,4 @@ PlayerView(
 | `accentColor`                   | `Color(0xFFE50914)` | Progress bar + UI accent                       |
 | `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
+| `telemetry`                     | `null`           | `TelemetryConfig` for playback reporting (see §11) |

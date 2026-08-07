@@ -16,7 +16,8 @@ dependencies:
   better_player_plus: 
     git: https://github.com/chikenare/better_player_plus.git
   wakelock_plus: ^1.7.0
-  xml: ^7.0.1 
+  xml: ^7.0.1
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

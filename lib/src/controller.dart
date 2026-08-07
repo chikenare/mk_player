@@ -13,6 +13,7 @@ import 'models/storyboard.dart';
 import 'models/video_fit.dart';
 import 'models/video_format.dart';
 import 'platform.dart';
+import 'telemetry/telemetry_reporter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -302,12 +303,40 @@ class CustomPlayerController extends ChangeNotifier {
     _notify();
   }
 
+  // ── Telemetry ──────────────────────────────────────────────────────────────
+
+  TelemetryReporter? _telemetry;
+
+  /// Playback telemetry reporter, or null when [PlayerConfig.telemetry] is
+  /// unset/disabled. Exposed for diagnostics (queued event count, session
+  /// state) and for hosts that want to force a flush.
+  TelemetryReporter? get telemetry => _telemetry;
+
+  /// Hands the reporter a freshly issued API token — call it after a re-login
+  /// so events held back by a 401 are delivered.
+  void updateTelemetryToken(String? token) => _telemetry?.updateToken(token);
+
+  /// Height of the quality currently being played, used as the telemetry
+  /// `resolution`. Prefers the selected ASMS track and falls back to the
+  /// decoded video size.
+  int? get _currentVideoHeight {
+    final trackHeight = betterPlayerController.betterPlayerAsmsTrack?.height;
+    if (trackHeight != null && trackHeight > 0) return trackHeight;
+    final size = betterPlayerController.videoPlayerController?.value.size;
+    if (size != null && size.height > 0) return size.height.round();
+    return null;
+  }
+
   // ── Constructor ────────────────────────────────────────────────────────────
 
   CustomPlayerController({PlayerConfig? config})
       : config = config ?? const PlayerConfig(),
         _volume = config?.initialVolume ?? 1.0,
         _speed = config?.initialSpeed ?? 1.0 {
+    final telemetry = this.config.telemetry;
+    if (telemetry != null && telemetry.enabled) {
+      _telemetry = TelemetryReporter(telemetry);
+    }
     _initPlayer();
   }
 
@@ -342,9 +371,9 @@ class CustomPlayerController extends ChangeNotifier {
     await _load(source);
   }
 
-  Future<void> _load(PlayerSource source) async {
+  Future<void> _load(PlayerSource source, {bool isRetry = false}) async {
     if (_disposed) return;
-    _beginSource(source);
+    _beginSource(source, isRetry: isRetry);
     try {
       await betterPlayerController.setupDataSource(_buildDataSource(source));
     } catch (e, st) {
@@ -504,7 +533,11 @@ class CustomPlayerController extends ChangeNotifier {
 
   // Resets per-source state and enters the loading phase. Storyboard fetch is
   // kicked off in the background.
-  void _beginSource(PlayerSource source) {
+  //
+  // [isRetry] marks a reload of the source already being played (auto-retry or
+  // the error-overlay button): the telemetry session survives it, since it is
+  // the same playback from the user's point of view.
+  void _beginSource(PlayerSource source, {bool isRetry = false}) {
     _lastSource = source;
     _currentTitle = source.title;
     _storyboard = null;
@@ -522,6 +555,20 @@ class CustomPlayerController extends ChangeNotifier {
     _transition(MkPlayerState.loading);
     _notify();
     _startLoadingTimeout();
+
+    if (!isRetry) {
+      final contentId = source.contentId;
+      if (contentId != null) {
+        _telemetry?.beginSession(
+          contentId: contentId,
+          episodeId: source.episodeId,
+        );
+      } else {
+        // Switching to a source we cannot attribute still closes the previous
+        // session cleanly.
+        _telemetry?.endSession();
+      }
+    }
 
     if (source.storyboardUrl != null) {
       _loadStoryboard(source.storyboardUrl!, source.storyboardHeaders);
@@ -668,7 +715,7 @@ class CustomPlayerController extends ChangeNotifier {
     _retryAttempt = 0;
     _retryTimer?.cancel();
     _errorMessage = null;
-    await _load(_lastSource!);
+    await _load(_lastSource!, isRetry: true);
   }
 
   // ── startAt ────────────────────────────────────────────────────────────────
@@ -724,6 +771,7 @@ class CustomPlayerController extends ChangeNotifier {
         betterPlayerController.setSpeed(_speed);
         _readVideoParams(value);
         _syncFromValue(value);
+        _telemetry?.onResolution(_currentVideoHeight);
         _applyStartAt();
         // PiP support can only be asked of the native player once it has a
         // texture, i.e. from `initialized` onwards.
@@ -735,20 +783,27 @@ class CustomPlayerController extends ChangeNotifier {
         _loadingTimeout?.cancel();
         _watchdogLastAdvance = null;
         _transition(MkPlayerState.playing);
+        _telemetry?.onPlaying(value?.position ?? _position);
         _setWakelock(true);
       case BetterPlayerEventType.pause:
         if (_state != MkPlayerState.completed) {
           _transition(MkPlayerState.paused);
         }
+        _telemetry?.onPaused(value?.position ?? _position);
         _setWakelock(false);
       case BetterPlayerEventType.progress:
         _syncFromValue(value);
         _readVideoParams(value);
+        _telemetry?.onPosition(
+          _position,
+          playing: betterPlayerController.isPlaying() ?? false,
+        );
         _checkPlaybackWatchdog();
       case BetterPlayerEventType.bufferingStart:
         if (_state != MkPlayerState.error) {
           _transition(MkPlayerState.buffering);
         }
+        _telemetry?.onBufferingStart();
       case BetterPlayerEventType.bufferingEnd:
         if (_state == MkPlayerState.buffering ||
             _state == MkPlayerState.loading) {
@@ -758,6 +813,10 @@ class CustomPlayerController extends ChangeNotifier {
                 : MkPlayerState.paused,
           );
         }
+        _telemetry?.onBufferingEnd();
+      case BetterPlayerEventType.changedTrack:
+      case BetterPlayerEventType.changedResolution:
+        _telemetry?.onResolution(_currentVideoHeight);
       case BetterPlayerEventType.bufferingUpdate:
         _syncFromValue(value);
       case BetterPlayerEventType.finished:
@@ -848,6 +907,7 @@ class CustomPlayerController extends ChangeNotifier {
     if (_disposed) return;
     if (config.loop) return; // better_player handles looping itself
     _transition(MkPlayerState.completed);
+    _telemetry?.endSession();
     _setWakelock(false);
     config.onCompleted?.call();
   }
@@ -869,13 +929,18 @@ class CustomPlayerController extends ChangeNotifier {
       _notify();
       _retryTimer?.cancel();
       _retryTimer = Timer(Duration(milliseconds: backoffMs), () {
-        if (!_disposed && _lastSource != null) _load(_lastSource!);
+        if (!_disposed && _lastSource != null) {
+          _load(_lastSource!, isRetry: true);
+        }
       });
       return;
     }
 
     _errorMessage = message;
     _transition(MkPlayerState.error);
+    // Only a definitive failure ends the telemetry session — the retries above
+    // are still the same playback attempt.
+    _telemetry?.reportError();
     _notify();
     config.onError?.call(message);
   }
@@ -906,6 +971,11 @@ class CustomPlayerController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    // Emits the final `end` event and drains the queue. The events are already
+    // on disk, so an incomplete flush is retried by the next player instance.
+    final telemetry = _telemetry;
+    _telemetry = null;
+    if (telemetry != null) unawaited(telemetry.close());
     _loadingTimeout?.cancel();
     _retryTimer?.cancel();
     betterPlayerController.removeEventsListener(_onEvent);

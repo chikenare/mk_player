@@ -15,6 +15,13 @@ export 'src/models/storyboard.dart' show Storyboard, StoryboardEntry;
 export 'src/models/video_fit.dart' show VideoFit;
 export 'src/models/video_format.dart' show PlayerVideoFormat;
 
+// ── Telemetry ─────────────────────────────────────────────────────────────────
+export 'src/telemetry/telemetry_config.dart'
+    show TelemetryConfig, TelemetryDeviceType, TelemetryKind;
+export 'src/telemetry/telemetry_event.dart'
+    show TelemetryEvent, TelemetryEventType;
+export 'src/telemetry/telemetry_reporter.dart' show TelemetryReporter;
+
 // ── Core controller ───────────────────────────────────────────────────────────
 export 'src/controller.dart' show CustomPlayerController, MkPlayerState;
 

@@ -3,6 +3,7 @@ import 'package:better_player_plus/better_player_plus.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
 
+import '../telemetry/telemetry_config.dart';
 import 'player_action.dart';
 import 'video_fit.dart';
 
@@ -161,6 +162,18 @@ class PlayerConfig {
   /// ```
   final List<DeviceOrientation>? fullscreenOrientations;
 
+  // ── Telemetry ─────────────────────────────────────────────────────────────
+
+  /// Playback telemetry reporting against your API.
+  ///
+  /// When set, the player emits `start` / `progress` / `end` / `error` events
+  /// to `POST {apiBaseUrl}/api/telemetry` with a bearer token, queues them on
+  /// disk and retries with backoff. `null` (default) disables reporting
+  /// entirely — nothing is measured and no network call is made.
+  ///
+  /// Only sources carrying a [PlayerSource.contentId] are reported.
+  final TelemetryConfig? telemetry;
+
   // ── Host-app callbacks ────────────────────────────────────────────────────
 
   /// Called when playback reaches the end of the source.
@@ -200,6 +213,7 @@ class PlayerConfig {
     this.initialVideoFit = VideoFit.contain,
     this.autoOrientation = false,
     this.fullscreenOrientations,
+    this.telemetry,
     this.onCompleted,
     this.onError,
     this.onPositionChanged,
@@ -233,6 +247,7 @@ class PlayerConfig {
     VideoFit? initialVideoFit,
     bool? autoOrientation,
     List<DeviceOrientation>? fullscreenOrientations,
+    TelemetryConfig? telemetry,
     VoidCallback? onCompleted,
     void Function(String)? onError,
     void Function(Duration)? onPositionChanged,
@@ -270,6 +285,7 @@ class PlayerConfig {
       autoOrientation: autoOrientation ?? this.autoOrientation,
       fullscreenOrientations:
           fullscreenOrientations ?? this.fullscreenOrientations,
+      telemetry: telemetry ?? this.telemetry,
       onCompleted: onCompleted ?? this.onCompleted,
       onError: onError ?? this.onError,
       onPositionChanged: onPositionChanged ?? this.onPositionChanged,

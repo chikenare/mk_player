@@ -19,6 +19,7 @@ A self-contained, highly reusable Flutter video player built on [better_player_p
 | **Wakelock** | Screen stays on during playback, released on pause/error/dispose |
 | **Error UI** | User-friendly overlay with Retry button and automatic 30 s timeout |
 | **PiP** | Built-in Picture-in-Picture button (Android & iOS) plus lifecycle hooks |
+| **Telemetry** | Playback reporting to your API — watched time, startup, rebuffers, quality — with a persistent offline queue |
 | **State** | `ChangeNotifier` — no third-party state library required |
 
 ---
@@ -189,6 +190,10 @@ PlayerSource.network(
     ExternalSubtitle(uri: 'https://cdn.example.com/en.vtt', title: 'English', language: 'en'),
     ExternalSubtitle(uri: 'https://cdn.example.com/es.vtt', title: 'Español', language: 'es'),
   ],
+
+  // Telemetry identity — see [Telemetry](#telemetry).
+  contentId: 812,       // required to report this playback
+  episodeId: 4711,      // null for movies
 )
 ```
 
@@ -297,7 +302,170 @@ CustomPlayerController(
 | `showVolumeControl` | `null` | Inline volume control; `null` = auto (hidden on mobile, where the OS volume keys are used), or force `true`/`false` |
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
+| `telemetry` | `null` | Playback telemetry reporting — see [Telemetry](#telemetry) |
 | `onPositionChanged` | `null` | Throttled (~1/sec) position callback — ideal for resume tracking |
+
+---
+
+## Telemetry
+
+The player can report playback consumption to your API on its own: how much was
+actually watched, how long startup took, how often it rebuffered and at which
+quality.
+
+```dart
+final controller = CustomPlayerController(
+  config: PlayerConfig(
+    telemetry: TelemetryConfig(
+      apiBaseUrl: 'https://api.example.com',   // POST {base}/api/telemetry
+      authToken: sanctumToken,                 // Authorization: Bearer …
+      appVersion: '3.4.1',
+      deviceType: TelemetryDeviceType.android, // .tv on Android TV
+    ),
+  ),
+);
+
+await controller.open(PlayerSource.network(
+  url,
+  contentId: 812,    // ← without this the source is played but not reported
+  episodeId: 4711,   // null for movies
+));
+```
+
+### What gets sent
+
+`POST {apiBaseUrl}/api/telemetry` with `Authorization: Bearer <token>` and
+batches of 1–50 events, oldest first:
+
+```jsonc
+{
+  "deviceType": "android",
+  "kind": "playback",
+  "appVersion": "3.4.1",
+  "events": [
+    {
+      "type": "progress",                        // start | progress | end | error
+      "sessionId": "01J4X8Y3NDQ2M9V7B1KQZT5W6E", // ULID, one per media load
+      "occurredAt": "2026-08-06T22:30:30-03:00", // always with offset
+      "contentId": 812,
+      "episodeId": 4711,
+      "positionSeconds": 1284,
+      "secondsWatchedDelta": 30,                 // since the previous event
+      "stallCountDelta": 1,
+      "stalledSecondsDelta": 4,
+      "resolution": "1080"
+    }
+  ]
+}
+```
+
+Event cycle, handled for you:
+
+| Event | When | Carries |
+|---|---|---|
+| `start` | first frame | `startupMs`, every delta at zero |
+| `progress` | every 30s **while playing** — never paused or backgrounded | the deltas of the interval |
+| `end` | playback stops, the source changes, the player is disposed, or the app is detached | the pending deltas |
+| `error` | fatal player error (after auto-retries are exhausted) | the pending deltas, never the error text — that belongs in Sentry |
+
+Every counter is a **delta since the previous event of the same session** and is
+reset once queued, so a lost report costs one interval and nothing else.
+`secondsWatchedDelta` follows the playhead while playing — pauses don't count and
+seeks are discarded, not billed as watched time. A rebuffer counts once, when it
+begins, so a freeze spanning several `progress` events stays one stall.
+
+`sessionId` is a ULID generated per media load (repeats of the same title
+included) and repeated on every event of that playback — it is what groups the
+events of one session server-side and lets a re-sent queue be deduplicated.
+
+Two deliberate contract details, both enforced at serialisation so a bad reading
+can never 422 a whole batch: **no numeric field is ever sent as `null`** (an
+absent key is 0 server-side, an explicit null is a validation error), and every
+value is clamped to the accepted range. A `422` is always logged with its status
+and batch size, `verbose` or not — the batch is dropped from the queue on 422, so
+a silent one would read as "reporting fine, no data".
+
+**A fatal error before the first frame is not reported.** That session never sent
+a `start`, so the server has no open session to close, and its error rate is
+computed over sessions it has seen. It is logged locally and your crash reporting
+still sees it.
+
+### Delivery
+
+Events are appended to a persistent on-disk queue (`<app-support>/mk_player/
+telemetry_queue.jsonl`) the moment they happen, so a killed process, an offline
+TV or a lost connection cannot drop them. The queue is drained every 60s, and on
+every session end. Events leave the queue **only** on `204` (accepted) or `422`
+(never going to work — logged); `429` and network errors keep them and retry with
+exponential backoff honouring `Retry-After`, and `401` holds the whole queue:
+
+```dart
+// After a re-login, hand the player the new token and the backlog goes out.
+controller.updateTelemetryToken(freshToken);
+```
+
+Backlogs over 50 events are sent in several requests, and the queue is capped
+(`maxQueuedEvents`, 500 by default) by dropping the oldest.
+
+### `bytesDownloadedDelta`
+
+The Flutter layer of ExoPlayer/Media3 does not expose `AnalyticsListener`
+counters, so mk_player cannot see real network traffic. Rather than estimate it
+from the bitrate — which would report traffic that never happened, and non-zero
+bytes for a local file — the field is **omitted** from the payload unless you
+wire a counter:
+
+```dart
+TelemetryConfig(
+  // …
+  // Cumulative bytes loaded by the player; the reporter turns it into deltas.
+  bytesLoadedProvider: () => MyNativeBridge.totalBytesLoaded(),
+)
+```
+
+The counter must be **bytes that really crossed the network** — a title played
+from local storage has to report 0. On Android that means an ExoPlayer
+`AnalyticsListener` in the plugin: either `onBandwidthEstimate(…,
+totalBytesLoaded, …)`, or the sum of `LoadEventInfo.bytesLoaded` in
+`onLoadCompleted` for finer granularity, exposed over a method channel. **This
+bridge lives in the `better_player_plus` fork, not in this package, and is not
+implemented yet** — until it is, the field is absent from every payload and the
+bandwidth metric stays empty.
+
+### `TelemetryConfig` reference
+
+| Field | Default | Description |
+|---|---|---|
+| `apiBaseUrl` | — | API origin, e.g. `https://api.example.com` |
+| `authToken` | `null` | Bearer token sent with every request |
+| `tokenProvider` | `null` | Resolves the token per request; wins over `authToken` |
+| `appVersion` | — | Reported as `appVersion` (truncated to 32 chars) |
+| `deviceType` | `.android` | `.web`, `.android`, `.tv` or `.other` |
+| `endpointPath` | `/api/telemetry` | Path appended to `apiBaseUrl` |
+| `kind` | `.playback` | `.playback` or `.download` |
+| `progressInterval` | `30s` | Spacing of `progress` events while playing |
+| `flushInterval` | `60s` | How often the queue is drained |
+| `maxBatchSize` | `50` | Events per request (API maximum) |
+| `maxQueuedEvents` | `500` | Queue cap; oldest are dropped past it |
+| `retryBaseDelay` | `5s` | Backoff base, doubling up to 15 min |
+| `queueFilePath` | `null` | Override the queue file location |
+| `bytesLoadedProvider` | `null` | Cumulative network bytes counter |
+| `enabled` | `true` | `false` keeps the wiring but reports nothing |
+| `verbose` | `false` | `debugPrint` queue/flush activity |
+
+### Verifying
+
+With `verbose: true`, play 30 seconds and check the log:
+
+1. a `start` (with `startupMs` > 0) and at least one `progress`, both answered
+   with 204;
+2. the reported seconds match what was actually played;
+3. `bytesDownloadedDelta` is plausible for the chosen quality — a 0, or an absent
+   key, means the native bridge above is not wired;
+4. closing the player emits an `end` with the pending deltas.
+
+Any `422` is a payload-contract mismatch and is printed with its status and batch
+size.
 
 ---
 
@@ -864,6 +1032,12 @@ lib/
     │   ├── player_config.dart      ← PlayerConfig
     │   ├── player_source.dart      ← PlayerSource
     │   └── storyboard.dart         ← Storyboard + VTT parser
+    ├── telemetry/
+    │   ├── telemetry_config.dart   ← TelemetryConfig
+    │   ├── telemetry_event.dart    ← TelemetryEvent + payload serialisation
+    │   ├── telemetry_queue.dart    ← persistent on-disk queue
+    │   ├── telemetry_client.dart   ← POST /api/telemetry
+    │   └── telemetry_reporter.dart ← session measurement + delivery
     └── widgets/
         ├── controls_overlay.dart   ← auto-hiding controls
         ├── progress_bar.dart       ← scrubber + thumbnail popup
@@ -880,6 +1054,8 @@ lib/
 |---|---|
 | `better_player_plus` (1.2.1) | Core player engine (ExoPlayer on Android) |
 | `wakelock_plus` | Screen sleep prevention |
+| `path_provider` | Location of the persistent telemetry queue |
+| `xml` | DASH manifest parsing |
 
 ---
 
