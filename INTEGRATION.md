@@ -435,9 +435,10 @@ system, which is what a TV user expects.
 | `useWakelock`                   | `true`           | Keep screen on during playback                    |
 | `controlsTimeoutSeconds`        | `4`              | Seconds before controls auto-hide                 |
 | `showBufferingIndicator`        | `true`           | Show spinner while buffering                      |
-| `accentColor`                   | `Color(0xFFE50914)` | Progress bar + UI accent                       |
+| `accentColor`                   | `Color(0xFFE50914)` | Progress bar colour (focus/selection are white) |
 | `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
+| `showAspectRatioButton`         | `null`           | Fit/Zoom/Stretch button; `null` = auto (desktop/web/TV), or force `true`/`false` |
 | `tvMode`                        | `TvMode.auto`    | Remote/D-pad handling: `auto` / `enabled` / `disabled` (see §12) |
 | `onSkipNext`                    | `null`           | Remote ⏭ key; falls back to a forward seek (see §12) |
 | `onSkipPrevious`                | `null`           | Remote ⏮ key; falls back to a backward seek (see §12) |

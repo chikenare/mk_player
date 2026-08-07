@@ -258,6 +258,27 @@ void main() {
       await drain(tester);
     });
 
+    testWidgets('showAspectRatioButton overrides the per-platform default',
+        (tester) async {
+      // By tooltip, not by icon: the fit flash badge carries the same icon.
+      final fitButton = find.byTooltip('Aspect ratio');
+
+      // TV chrome on → shown by default (no pinch gesture to replace it).
+      await pumpOverlay(tester);
+      expect(fitButton, findsOneWidget);
+      await drain(tester);
+
+      await pumpOverlay(
+        tester,
+        config: const PlayerConfig(
+          tvMode: TvMode.enabled,
+          showAspectRatioButton: false,
+        ),
+      );
+      expect(fitButton, findsNothing);
+      await drain(tester);
+    });
+
     testWidgets('TvMode.disabled ignores the remote entirely', (tester) async {
       await pumpOverlay(
         tester,

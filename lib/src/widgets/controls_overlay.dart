@@ -736,8 +736,10 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             // problem, and a locked screen is a trap without a touchscreen.
             onLock: cfg.showLockButton && !_tvActive ? _lock : null,
             onEnterPip: cfg.showPipButton ? widget.onEnterPip : null,
-            // Aspect-ratio button: desktop/web and TV (mobile uses pinch).
-            onCycleFit: isDesktopOrWeb || _tvActive
+            // Aspect-ratio button: by default desktop/web and TV, where there
+            // is no pinch gesture to replace it.
+            onCycleFit: (cfg.showAspectRatioButton ??
+                    (isDesktopOrWeb || _tvActive))
                 ? () {
                     ctrl.cycleVideoFit();
                     _flashFit(_fitLabel(ctrl.videoFit));
@@ -888,7 +890,6 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = config.accentColor;
     return SafeArea(
       bottom: false,
       child: Padding(
@@ -900,14 +901,12 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.fullscreen_exit_rounded,
                 size: 24,
                 tooltip: 'Exit fullscreen',
-                accentColor: accent,
                 onPressed: onToggleFullscreen,
               )
             else if (Navigator.of(context).canPop())
               _IconBtn(
                 icon: Icons.arrow_back_ios_new_rounded,
                 size: 20,
-                accentColor: accent,
                 onPressed: () => Navigator.of(context).pop(),
               ),
 
@@ -934,7 +933,6 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.aspect_ratio_rounded,
                 size: 22,
                 tooltip: 'Aspect ratio',
-                accentColor: accent,
                 onPressed: onCycleFit,
               ),
 
@@ -949,7 +947,6 @@ class _TopBar extends StatelessWidget {
                         icon: Icons.picture_in_picture_alt_rounded,
                         size: 22,
                         tooltip: 'Picture-in-Picture',
-                        accentColor: accent,
                         onPressed: onEnterPip,
                       )
                     : const SizedBox.shrink(),
@@ -961,7 +958,6 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.lock_outline_rounded,
                 size: 22,
                 tooltip: 'Lock screen',
-                accentColor: accent,
                 onPressed: onLock,
               ),
 
@@ -971,7 +967,6 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.fullscreen_rounded,
                 size: 24,
                 tooltip: 'Fullscreen',
-                accentColor: accent,
                 onPressed: onToggleFullscreen,
               ),
           ],
@@ -1011,7 +1006,6 @@ class _CentreRow extends StatelessWidget {
             seconds: seekSeconds,
             forward: false,
             focusable: focusable,
-            accentColor: controller.config.accentColor,
             onTap: () { onRewind(); onActivity(); }),
         const SizedBox(width: 28),
         _CentreButton(
@@ -1024,7 +1018,6 @@ class _CentreRow extends StatelessWidget {
             seconds: seekSeconds,
             forward: true,
             focusable: focusable,
-            accentColor: controller.config.accentColor,
             onTap: () { onForward(); onActivity(); }),
       ],
     );
@@ -1076,7 +1069,6 @@ class _CentreButton extends StatelessWidget {
             height: 66,
             decoration: tvFocusDecoration(
               focused: focused,
-              accentColor: controller.config.accentColor,
               background: Colors.black.withAlpha(120),
             ),
             child: Icon(icon, color: Colors.white, size: 36),
@@ -1091,14 +1083,12 @@ class _SkipButton extends StatelessWidget {
   final int seconds;
   final bool forward;
   final bool focusable;
-  final Color accentColor;
   final VoidCallback onTap;
 
   const _SkipButton({
     required this.seconds,
     required this.forward,
     required this.focusable,
-    required this.accentColor,
     required this.onTap,
   });
 
@@ -1126,7 +1116,6 @@ class _SkipButton extends StatelessWidget {
         height: 48,
         decoration: tvFocusDecoration(
           focused: focused,
-          accentColor: accentColor,
           background: Colors.black.withAlpha(100),
         ),
         child: Icon(_icon, color: Colors.white, size: 24),
@@ -1235,15 +1224,11 @@ class _BottomBarState extends State<_BottomBar> {
                       children: [
                         Text(
                           formatDuration(preview ?? ctrl.position),
-                          style: TextStyle(
-                            color: preview != null
-                                ? cfg.accentColor
-                                : Colors.white,
+                          style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures(),
-                            ],
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
                         if (ctrl.isLive)
@@ -1300,7 +1285,6 @@ class _BottomBarState extends State<_BottomBar> {
                       _ActionButton(
                         icon: Icons.speed_rounded,
                         label: speed == 1.0 ? 'Speed' : 'Speed · $speed×',
-                        accentColor: cfg.accentColor,
                         onTap: () => widget.onOpenSheet(
                           () => showSpeedSheet(context, ctrl),
                         ),
@@ -1309,7 +1293,6 @@ class _BottomBarState extends State<_BottomBar> {
                         _ActionButton(
                           icon: Icons.multitrack_audio_rounded,
                           label: 'Audio',
-                          accentColor: cfg.accentColor,
                           onTap: () => widget.onOpenSheet(
                             () => showAudioSheet(context, ctrl),
                           ),
@@ -1318,7 +1301,6 @@ class _BottomBarState extends State<_BottomBar> {
                         _ActionButton(
                           icon: Icons.closed_caption_rounded,
                           label: 'Subtitles',
-                          accentColor: cfg.accentColor,
                           onTap: () => widget.onOpenSheet(
                             () => showSubtitleSheet(context, ctrl, config: cfg),
                           ),
@@ -1342,13 +1324,11 @@ class _BottomBarState extends State<_BottomBar> {
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Color accentColor;
   final VoidCallback onTap;
 
   const _ActionButton({
     required this.icon,
     required this.label,
-    required this.accentColor,
     required this.onTap,
   });
 
@@ -1360,7 +1340,6 @@ class _ActionButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: tvFocusDecoration(
           focused: focused,
-          accentColor: accentColor,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
@@ -1449,7 +1428,6 @@ class _VolumeButtonState extends State<_VolumeButton> {
                   : Icons.volume_up_rounded,
           size: 22,
           compact: true,
-          accentColor: widget.controller.config.accentColor,
           onPressed: () {
             setState(() => _expanded = !_expanded);
             if (!_expanded) widget.controller.toggleMute();
@@ -1521,7 +1499,6 @@ class _IconBtn extends StatelessWidget {
   final double size;
   final String? tooltip;
   final bool compact;
-  final Color accentColor;
   final VoidCallback? onPressed;
 
   const _IconBtn({
@@ -1529,7 +1506,6 @@ class _IconBtn extends StatelessWidget {
     required this.size,
     this.tooltip,
     this.compact = false,
-    this.accentColor = Colors.white,
     this.onPressed,
   });
 
@@ -1547,7 +1523,6 @@ class _IconBtn extends StatelessWidget {
           alignment: Alignment.center,
           decoration: tvFocusDecoration(
             focused: focused,
-            accentColor: accentColor,
           ),
           child: Icon(
             icon,

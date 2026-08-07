@@ -148,6 +148,20 @@ class PlayerConfig {
   /// host activity) and on iOS. It is never rendered on desktop or web.
   final bool showPipButton;
 
+  /// Whether to show the aspect-ratio button (Fit → Zoom → Stretch) in the top
+  /// controls bar.
+  ///
+  /// `null` (default) = automatic: shown where there is no pinch gesture to
+  /// replace it — desktop, web, and while the TV chrome is on — and hidden on
+  /// phones and tablets, which cycle the fit by pinching the video itself.
+  /// Set `true`/`false` to force it on or off.
+  ///
+  /// Hiding the button does not lock the fit: [PlayerConfig.initialVideoFit]
+  /// still applies, pinch still works on mobile, and
+  /// `CustomPlayerController.setVideoFit` / `cycleVideoFit` remain available
+  /// for a host-supplied control.
+  final bool? showAspectRatioButton;
+
   /// Whether to show the inline volume control in the bottom bar.
   ///
   /// `null` (default) = automatic: shown on desktop/web (no hardware volume
@@ -273,6 +287,7 @@ class PlayerConfig {
     this.showTitle = true,
     this.showLockButton = true,
     this.showPipButton = true,
+    this.showAspectRatioButton,
     this.showVolumeControl,
     this.accentColor = const Color(0xFFE50914),
     this.subtitlesConfiguration = const BetterPlayerSubtitlesConfiguration(),
@@ -311,6 +326,7 @@ class PlayerConfig {
     bool? showTitle,
     bool? showLockButton,
     bool? showPipButton,
+    bool? showAspectRatioButton,
     bool? showVolumeControl,
     Color? accentColor,
     BetterPlayerSubtitlesConfiguration? subtitlesConfiguration,
@@ -351,6 +367,8 @@ class PlayerConfig {
       showTitle: showTitle ?? this.showTitle,
       showLockButton: showLockButton ?? this.showLockButton,
       showPipButton: showPipButton ?? this.showPipButton,
+      showAspectRatioButton:
+          showAspectRatioButton ?? this.showAspectRatioButton,
       showVolumeControl: showVolumeControl ?? this.showVolumeControl,
       accentColor: accentColor ?? this.accentColor,
       subtitlesConfiguration:

@@ -23,7 +23,6 @@ Future<void> showSpeedSheet(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: _SpeedChipRow(
             current: controller.speed,
-            accentColor: controller.config.accentColor,
             onSelect: controller.setSpeed,
           ),
         ),
@@ -57,7 +56,6 @@ Future<void> showAudioSheet(
                   label: _audioLabel(tracks[i], i),
                   icon: Icons.headphones_rounded,
                   isSelected: tracks[i].id == selectedId,
-                  accentColor: controller.config.accentColor,
                   autofocus: hasSelection
                       ? tracks[i].id == selectedId
                       : i == 0,
@@ -92,7 +90,6 @@ Future<void> showSubtitleSheet(
           final sources = controller.subtitleSources;
           final selected = controller.selectedSubtitle;
           final cfg = config ?? controller.config;
-          final accent = cfg.accentColor;
           final actions = cfg.subtitleActions;
 
           final hasSelection = sources.contains(selected);
@@ -110,7 +107,6 @@ Future<void> showSubtitleSheet(
                             ? Icons.subtitles_off_rounded
                             : Icons.closed_caption_rounded,
                     isSelected: sources[i] == selected,
-                    accentColor: accent,
                     autofocus:
                         hasSelection ? sources[i] == selected : i == 0,
                     onTap: () {
@@ -127,7 +123,6 @@ Future<void> showSubtitleSheet(
                     label: action.label,
                     icon: action.icon,
                     isSelected: false,
-                    accentColor: accent,
                     // With no tracks at all, the host actions are the only
                     // thing a remote can land on.
                     autofocus: !controller.hasSubtitles &&
@@ -231,12 +226,10 @@ const _kSpeedOptions = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 class _SpeedChipRow extends StatelessWidget {
   final double current;
-  final Color accentColor;
   final ValueChanged<double> onSelect;
 
   const _SpeedChipRow({
     required this.current,
-    required this.accentColor,
     required this.onSelect,
   });
 
@@ -257,16 +250,16 @@ class _SpeedChipRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
             decoration: BoxDecoration(
               color: focused
-                  ? accentColor.withAlpha(60)
+                  ? Colors.white.withAlpha(45)
                   : selected
-                      ? accentColor.withAlpha(35)
+                      ? Colors.white.withAlpha(28)
                       : Colors.white10,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
                 color: focused
                     ? Colors.white
                     : selected
-                        ? accentColor
+                        ? Colors.white54
                         : Colors.transparent,
                 width: focused ? 2 : 1.5,
               ),
@@ -274,11 +267,7 @@ class _SpeedChipRow extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(
-                color: focused
-                    ? Colors.white
-                    : selected
-                        ? accentColor
-                        : Colors.white70,
+                color: selected || focused ? Colors.white : Colors.white70,
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
@@ -298,7 +287,6 @@ class _TrackTile extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool isSelected;
-  final Color accentColor;
   final VoidCallback onTap;
 
   /// Takes focus when the sheet opens, so a remote lands on a real entry
@@ -309,7 +297,6 @@ class _TrackTile extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.isSelected,
-    required this.accentColor,
     required this.onTap,
     this.autofocus = false,
   });
@@ -319,6 +306,8 @@ class _TrackTile extends StatelessWidget {
     return TvFocusable(
       onPressed: onTap,
       autofocus: autofocus,
+      // Selection and focus are both drawn in white, at different weights:
+      // a tint for the chosen track, a tint plus a ring for the focused one.
       builder: (_, focused) => AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         height: 52,
@@ -326,9 +315,9 @@ class _TrackTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: focused
-              ? accentColor.withAlpha(60)
+              ? Colors.white.withAlpha(45)
               : isSelected
-                  ? accentColor.withAlpha(25)
+                  ? Colors.white.withAlpha(20)
                   : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
@@ -339,7 +328,7 @@ class _TrackTile extends StatelessWidget {
         child: Row(
           children: [
             Icon(icon,
-                size: 18, color: isSelected ? accentColor : Colors.white38),
+                size: 18, color: isSelected ? Colors.white : Colors.white38),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -352,15 +341,17 @@ class _TrackTile extends StatelessWidget {
               ),
             ),
             if (isSelected)
-              Container(
-                width: 20,
-                height: 20,
+              const DecoratedBox(
                 decoration: BoxDecoration(
-                  color: accentColor,
+                  color: Colors.white,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 13),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Icon(Icons.check_rounded,
+                      color: Color(0xFF161616), size: 13),
+                ),
               )
             else
               const SizedBox(width: 20),

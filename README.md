@@ -278,7 +278,7 @@ CustomPlayerController(
     initialVideoFit: VideoFit.contain, // contain | cover | fill
 
     // ── UI
-    accentColor: Color(0xFF0071EB),      // progress bar + highlights
+    accentColor: Color(0xFF0071EB),      // progress bar
     subtitlesConfiguration: BetterPlayerSubtitlesConfiguration(
       fontSize: 18,                      // subtitle appearance (see below)
       backgroundColor: Colors.black54,
@@ -324,7 +324,7 @@ CustomPlayerController(
 | `useWakelock` | `true` | Prevents screen sleep during playback |
 | `aspectRatio` | `null` | Forces canvas ratio; `null` = stream native |
 | `initialVideoFit` | `VideoFit.contain` | Initial scaling: `contain` / `cover` / `fill` |
-| `accentColor` | `Color(0xFFE50914)` | Accent colour for UI elements |
+| `accentColor` | `Color(0xFFE50914)` | Colour of the played part of the progress bar. Focus and selection are drawn in translucent white, independent of it |
 | `subtitlesConfiguration` | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance — see [Subtitle styling](#subtitle-styling) |
 | `showControls` | `true` | Render the built-in controls overlay. `false` leaves only the video surface (plus poster/buffering/error) so the host can stack its own UI |
 | `tvMode` | `TvMode.auto` | How the controls answer a remote/D-pad: `auto` (focus skin appears on the first key press), `enabled` (always — use it on Android TV), `disabled` (touch only) — see [Remote control / Android TV](#remote-control--android-tv) |
@@ -336,6 +336,7 @@ CustomPlayerController(
 | `showTitle` | `true` | Show the source title in the top bar |
 | `showLockButton` | `true` | Show the lock-screen button (top-right) |
 | `showPipButton` | `true` | Show the Picture-in-Picture button — Android/iOS only, and only when the device supports PiP — see [Picture-in-Picture](#picture-in-picture) |
+| `showAspectRatioButton` | `null` | Show the aspect-ratio button (Fit → Zoom → Stretch); `null` = auto (shown on desktop/web/TV, hidden on mobile where pinch does the same), or force `true`/`false` |
 | `showVolumeControl` | `null` | Inline volume control; `null` = auto (hidden on mobile, where the OS volume keys are used), or force `true`/`false` |
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |

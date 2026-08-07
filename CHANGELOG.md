@@ -15,6 +15,15 @@
   On TV the lock button is hidden and the centre buttons leave the focus order.
 * **`PlayerConfig.onSkipNext` / `onSkipPrevious`** — the remote's ⏮ / ⏭ keys,
   for hosts with a playlist of their own. Unset, those keys seek.
+* **`PlayerConfig.showAspectRatioButton`** — show or hide the Fit → Zoom →
+  Stretch button. `null` (default) keeps the previous per-platform rule: shown
+  on desktop, web and TV, hidden on mobile where a pinch does the same. Hiding
+  it does not lock the fit — `initialVideoFit`, pinch and `setVideoFit` /
+  `cycleVideoFit` all still work.
+* Focus and selection are drawn in translucent white throughout — the focus
+  ring, the selected track and speed chip, and the elapsed time while scrubbing
+  ahead. `accentColor` now tints the progress bar only, instead of filling the
+  screen with tinted blocks.
 * The example app's manifest now declares the leanback launcher and optional
   touchscreen, so it can be installed and driven on an Android TV.
 

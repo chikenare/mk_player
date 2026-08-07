@@ -102,16 +102,17 @@ class _TvFocusableState extends State<TvFocusable> {
 /// The focus ring shared by every TV-navigable control.
 ///
 /// Deliberately loud: it is read from three metres away, on top of moving
-/// video, by someone who cannot see a cursor.
+/// video, by someone who cannot see a cursor. Neutral white rather than the
+/// accent colour — the accent belongs to the progress bar, and a screen full
+/// of tinted blocks reads as noise.
 BoxDecoration tvFocusDecoration({
   required bool focused,
-  required Color accentColor,
   BoxShape shape = BoxShape.circle,
   BorderRadius? borderRadius,
   Color? background,
 }) {
   return BoxDecoration(
-    color: focused ? accentColor.withAlpha(60) : background,
+    color: focused ? Colors.white.withAlpha(45) : background,
     // A BoxDecoration may not carry both a circle shape and a radius.
     shape: borderRadius != null ? BoxShape.rectangle : shape,
     borderRadius: borderRadius,
