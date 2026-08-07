@@ -732,7 +732,11 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             controller: ctrl,
             config: cfg,
             isFullscreen: widget.isFullscreen,
-            onToggleFullscreen: widget.onToggleFullscreen,
+            // ⛶ is meaningless on a TV: the video already fills the screen and
+            // there is no window or orientation to manage there.
+            onToggleFullscreen: (cfg.showFullscreenButton ?? !_tvActive)
+                ? widget.onToggleFullscreen
+                : null,
             // On TV the remote's own Back key leaves the player (the overlay
             // closes first, see [PopScope] in build) — an on-screen arrow only
             // spends a focus stop on something the hardware already does.
@@ -902,7 +906,10 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget? leading = isFullscreen
+    // With the ⛶ button hidden the exit one goes too — nothing could have
+    // opened the fullscreen route — and the back arrow takes the slot, so the
+    // route is never a place the user cannot leave.
+    final Widget? leading = isFullscreen && onToggleFullscreen != null
         ? _IconBtn(
             icon: Icons.fullscreen_exit_rounded,
             size: 24,

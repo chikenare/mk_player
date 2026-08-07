@@ -418,6 +418,7 @@ covers — each one is a focus stop the user has to travel through:
 | ⏪ / ⏩ ±`seekSeconds` | ← / → scrubbing; the centre play/pause stays as a state indicator, out of the focus order |
 | **Speed** | nothing on screen — `controller.setSpeed()` for a host-supplied control |
 | 🔒 **Lock** | nothing: a locked player is a trap without a touchscreen |
+| ⛶ **Fullscreen** | nothing: the video already fills the screen and a TV has no window or orientation to manage |
 
 **Audio** and **Subtitles** become a single **Audio & Subtitles** button that
 opens a panel pinned to the right edge: one column per type, each as tall as its
@@ -426,9 +427,11 @@ that is playing; OK applies it and keeps the panel open (the check mark moves),
 Back closes it. `subtitleActions` sit under the subtitle column and still close
 the panel before running.
 
-Nothing here is configurable per-button — it follows the TV skin, so a
-`TvMode.auto` build swaps layouts the moment a remote is used and swaps back for
-a finger. `showLockButton` / `showAspectRatioButton` still govern the touch case.
+The layout follows the TV skin, so a `TvMode.auto` build swaps to it the moment a
+remote is used and swaps back for a finger. Of the four, only ⛶ can be forced
+back on (`showFullscreenButton: true`); `showLockButton`,
+`showAspectRatioButton` and `showFullscreenButton` all still govern the touch
+case as usual.
 
 ### Notes
 
@@ -459,6 +462,7 @@ a finger. `showLockButton` / `showAspectRatioButton` still govern the touch case
 | `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
 | `showAspectRatioButton`         | `null`           | Fit/Zoom/Stretch button; `null` = auto (desktop/web/TV), or force `true`/`false` |
+| `showFullscreenButton`          | `null`           | ⛶ fullscreen button; `null` = auto (off while the TV skin is on), or force `true`/`false` |
 | `tvMode`                        | `TvMode.auto`    | Remote/D-pad handling: `auto` / `enabled` / `disabled` (see §12) |
 | `onSkipNext`                    | `null`           | Remote ⏭ key; falls back to a forward seek (see §12) |
 | `onSkipPrevious`                | `null`           | Remote ⏮ key; falls back to a backward seek (see §12) |

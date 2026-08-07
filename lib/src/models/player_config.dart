@@ -162,6 +162,24 @@ class PlayerConfig {
   /// for a host-supplied control.
   final bool? showAspectRatioButton;
 
+  /// Whether to show the ⛶ fullscreen button in the top controls bar — the
+  /// "expand" one, easily mistaken for a zoom control.
+  ///
+  /// `null` (default) = automatic: shown everywhere except while the TV chrome
+  /// is on, where the video already fills the screen and there is neither a
+  /// window nor an orientation to manage. Set `true`/`false` to force it.
+  ///
+  /// `false` also drops the ⛶ exit button, since without the first one there is
+  /// no way into the fullscreen route to begin with. What the button does — the
+  /// orientation lock and immersive system UI of
+  /// [PlayerConfig.fullscreenOrientations] — is unavailable from the built-in
+  /// UI once it is hidden; a host that wants both can host [PlayerView] in a
+  /// route of its own.
+  ///
+  /// Not to be confused with [showAspectRatioButton], which cycles
+  /// Fit → Zoom → Stretch *inside* the current surface.
+  final bool? showFullscreenButton;
+
   /// Whether to show the inline volume control in the bottom bar.
   ///
   /// `null` (default) = automatic: shown on desktop/web (no hardware volume
@@ -288,6 +306,7 @@ class PlayerConfig {
     this.showLockButton = true,
     this.showPipButton = true,
     this.showAspectRatioButton,
+    this.showFullscreenButton,
     this.showVolumeControl,
     this.accentColor = const Color(0xFFE50914),
     this.subtitlesConfiguration = const BetterPlayerSubtitlesConfiguration(),
@@ -327,6 +346,7 @@ class PlayerConfig {
     bool? showLockButton,
     bool? showPipButton,
     bool? showAspectRatioButton,
+    bool? showFullscreenButton,
     bool? showVolumeControl,
     Color? accentColor,
     BetterPlayerSubtitlesConfiguration? subtitlesConfiguration,
@@ -369,6 +389,7 @@ class PlayerConfig {
       showPipButton: showPipButton ?? this.showPipButton,
       showAspectRatioButton:
           showAspectRatioButton ?? this.showAspectRatioButton,
+      showFullscreenButton: showFullscreenButton ?? this.showFullscreenButton,
       showVolumeControl: showVolumeControl ?? this.showVolumeControl,
       accentColor: accentColor ?? this.accentColor,
       subtitlesConfiguration:

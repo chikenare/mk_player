@@ -157,6 +157,7 @@ void main() {
     Future<CustomPlayerController> pumpOverlay(
       WidgetTester tester, {
       PlayerConfig config = const PlayerConfig(tvMode: TvMode.enabled),
+      VoidCallback? onToggleFullscreen,
     }) async {
       final controller = CustomPlayerController(config: config);
       addTearDown(controller.dispose);
@@ -165,6 +166,7 @@ void main() {
           body: PlayerControlsOverlay(
             controller: controller,
             config: config,
+            onToggleFullscreen: onToggleFullscreen,
           ),
         ),
       ));
@@ -278,6 +280,52 @@ void main() {
         ),
       );
       expect(fitButton, findsNothing);
+      await drain(tester);
+    });
+
+    testWidgets('showFullscreenButton overrides the per-skin default',
+        (tester) async {
+      final fullscreenButton = find.byTooltip('Fullscreen');
+
+      // TV chrome on → dropped: the video already fills the screen.
+      await pumpOverlay(tester, onToggleFullscreen: () {});
+      expect(fullscreenButton, findsNothing);
+      await drain(tester);
+
+      await pumpOverlay(
+        tester,
+        config: const PlayerConfig(
+          tvMode: TvMode.enabled,
+          showFullscreenButton: true, // forced back on
+        ),
+        onToggleFullscreen: () {},
+      );
+      expect(fullscreenButton, findsOneWidget);
+      await drain(tester);
+
+      // See the note in the next test: the chrome is resolved once, in
+      // initState, so the tree has to go before the skin changes.
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // Touch keeps it…
+      await pumpOverlay(
+        tester,
+        config: const PlayerConfig(tvMode: TvMode.disabled),
+        onToggleFullscreen: () {},
+      );
+      expect(fullscreenButton, findsOneWidget);
+      await drain(tester);
+
+      // …unless it is explicitly turned off.
+      await pumpOverlay(
+        tester,
+        config: const PlayerConfig(
+          tvMode: TvMode.disabled,
+          showFullscreenButton: false,
+        ),
+        onToggleFullscreen: () {},
+      );
+      expect(fullscreenButton, findsNothing);
       await drain(tester);
     });
 

@@ -289,6 +289,7 @@ CustomPlayerController(
     showTitle: true,                     // title in the top bar
     showLockButton: true,                // lock-screen button (top-right)
     showPipButton: true,                 // Picture-in-Picture button (mobile)
+    showFullscreenButton: null,          // ⛶ expand: null = auto (off on TV)
     subtitleActions: [                   // extra entries in the subtitle sheet
       PlayerSheetAction(
         icon: Icons.search_rounded,
@@ -337,6 +338,7 @@ CustomPlayerController(
 | `showLockButton` | `true` | Show the lock-screen button (top-right) |
 | `showPipButton` | `true` | Show the Picture-in-Picture button — Android/iOS only, and only when the device supports PiP — see [Picture-in-Picture](#picture-in-picture) |
 | `showAspectRatioButton` | `null` | Show the aspect-ratio button (Fit → Zoom → Stretch); `null` = auto (shown on desktop/web/TV, hidden on mobile where pinch does the same), or force `true`/`false` |
+| `showFullscreenButton` | `null` | Show the ⛶ fullscreen button (top-right); `null` = auto (hidden while the TV chrome is on, shown otherwise), or force `true`/`false`. `false` also drops the ⛶ exit button — nothing can open the fullscreen route without the first one |
 | `showVolumeControl` | `null` | Inline volume control; `null` = auto (hidden on mobile, where the OS volume keys are used), or force `true`/`false` |
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
@@ -812,6 +814,7 @@ The remote already does these, so the buttons only cost focus stops:
 | ⏪ / ⏩ ±`seekSeconds` buttons | **← / →** scrub, with acceleration. The centre play/pause stays as a state indicator (out of the focus order) |
 | **Speed** | A lean-forward control; `CustomPlayerController.setSpeed` is still there for a host-supplied one |
 | 🔒 **Lock** | A locked screen is a trap without a touchscreen |
+| ⛶ **Fullscreen** | The video already fills the screen, and a TV has no window or orientation to manage. Force it back with `showFullscreenButton: true` |
 
 The **Audio** and **Subtitles** buttons also collapse into a single
 **Audio & Subtitles** entry — see below.

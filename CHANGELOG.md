@@ -34,6 +34,13 @@
   on desktop, web and TV, hidden on mobile where a pinch does the same. Hiding
   it does not lock the fit — `initialVideoFit`, pinch and `setVideoFit` /
   `cycleVideoFit` all still work.
+* **`PlayerConfig.showFullscreenButton`** — show or hide the ⛶ fullscreen
+  button, the "expand" one that is easily mistaken for a zoom control (the
+  Fit → Zoom → Stretch button is `showAspectRatioButton`). `null` (default) =
+  automatic: hidden while the TV chrome is on, where the video already fills
+  the screen and there is no window or orientation to manage, and shown
+  everywhere else. `false` drops the ⛶ exit button too, since nothing can open
+  the fullscreen route without the first one.
 * Focus and selection are drawn in translucent white throughout — the focus
   ring, the selected track and speed chip, and the elapsed time while scrubbing
   ahead. `accentColor` now tints the progress bar only, instead of filling the
