@@ -1,11 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyEvent, KeyUpEvent;
 
 import '../controller.dart';
 import '../models/player_config.dart';
+import '../models/tv_mode.dart';
 import '../models/video_fit.dart';
 import '../platform.dart';
+import '../tv/remote_key.dart';
+import '../tv/tv_chrome.dart';
+import '../tv/tv_focusable.dart';
 import 'listenable_selector.dart';
 import 'progress_bar.dart';
 import 'settings_sheet.dart';
@@ -52,6 +57,11 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
   Timer? _hideTimer;
   bool _scrubbing = false;
 
+  // Mirrors the fade animation as plain state: the remote handler, the focus
+  // bookkeeping and PopScope all need to know synchronously whether the
+  // controls are on screen.
+  bool _visible = false;
+
   // ── Screen lock ────────────────────────────────────────────────────────────
   bool _locked = false;
 
@@ -82,8 +92,34 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
   String? _fitFlash;
   Timer? _fitFlashTimer;
 
+  // ── TV / remote ────────────────────────────────────────────────────────────
+
+  /// Whether the focus-driven skin is on (see [TvMode]).
+  bool _tvActive = false;
+
+  /// Receives every key while nothing inside the controls holds focus, and
+  /// sees the rest on the way up from whichever control does.
+  final FocusNode _keyNode =
+      FocusNode(debugLabel: 'MkPlayer remote', skipTraversal: true);
+
+  /// The seek bar as a focus target: while it holds focus, left/right scrub
+  /// instead of moving the focus sideways.
+  final FocusNode _seekFocus = FocusNode(debugLabel: 'MkPlayer seek bar');
+
+  FocusHighlightStrategy? _restoreHighlightStrategy;
+
+  // D-pad scrubbing: the target is previewed on the bar and only committed once
+  // the user stops pressing, so holding → is one seek, not thirty.
+  Duration? _seekPreview;
+  bool _seekCommitted = false;
+  DateTime? _seekCommittedAt;
+  Timer? _seekCommitTimer;
+  int _remoteSeekRepeats = 0;
+
   CustomPlayerController get ctrl => widget.controller;
   PlayerConfig get cfg => widget.config;
+
+  bool get _remoteEnabled => cfg.tvMode != TvMode.disabled;
 
   @override
   void initState() {
@@ -96,13 +132,62 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
       value: 0.0,
     );
     _opacity = CurvedAnimation(parent: _anim, curve: Curves.easeInOut);
+
+    if (_remoteEnabled) {
+      if (cfg.tvMode == TvMode.enabled) {
+        // A leanback app is keyboard-navigated from the first frame — without
+        // this the focus ring would only appear after the first key press.
+        _restoreHighlightStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+      }
+      _tvActive = resolveTvChrome(cfg.tvMode);
+      FocusManager.instance.addHighlightModeListener(_onHighlightModeChanged);
+      ctrl.addListener(_onControllerTick);
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    _tapTimer?.cancel();
+    _seekFlashTimer?.cancel();
+    _fitFlashTimer?.cancel();
+    _seekCommitTimer?.cancel();
+    if (_remoteEnabled) {
+      FocusManager.instance
+          .removeHighlightModeListener(_onHighlightModeChanged);
+      ctrl.removeListener(_onControllerTick);
+      final restore = _restoreHighlightStrategy;
+      if (restore != null) FocusManager.instance.highlightStrategy = restore;
+    }
+    _keyNode.dispose();
+    _seekFocus.dispose();
+    _anim.dispose();
+    super.dispose();
+  }
+
+  void _onHighlightModeChanged(FocusHighlightMode mode) {
+    final active = resolveTvChrome(cfg.tvMode, mode);
+    if (!mounted || active == _tvActive) return;
+    setState(() => _tvActive = active);
+    _syncFocus();
   }
 
   // ── Visibility ─────────────────────────────────────────────────────────────
 
   void _show() {
+    if (!_visible) setState(() => _visible = true);
     _anim.forward();
     _scheduleHide();
+    _syncFocus();
+  }
+
+  void _hide() {
+    _hideTimer?.cancel();
+    if (_visible) setState(() => _visible = false);
+    _anim.reverse();
+    _syncFocus();
   }
 
   void _scheduleHide() {
@@ -116,14 +201,18 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
 
   void _hideIfPlaying() {
     if (!mounted || _scrubbing) return;
+    // A D-pad scrub in progress keeps the controls up until it commits.
+    if (_seekPreview != null) {
+      _scheduleHide();
+      return;
+    }
     // When locked, always allow the lock affordance to hide.
-    if (_locked || ctrl.isPlaying) _anim.reverse();
+    if (_locked || ctrl.isPlaying) _hide();
   }
 
   void _toggleVisibility() {
-    if (_anim.value > 0.5) {
-      _hideTimer?.cancel();
-      _anim.reverse();
+    if (_visible) {
+      _hide();
       // Block the click's trailing hover event from re-opening the controls.
       _suppressHoverUntil =
           DateTime.now().add(const Duration(milliseconds: 500));
@@ -148,6 +237,21 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
   void _unlock() {
     setState(() => _locked = false);
     _show();
+  }
+
+  // ── Focus bookkeeping ──────────────────────────────────────────────────────
+
+  /// Keeps focus where the user can see it: on a control while the bar is up,
+  /// on the invisible key handler once it fades out (otherwise "OK" would press
+  /// a button nobody can see).
+  void _syncFocus() {
+    if (!_remoteEnabled || !_tvActive || !mounted) return;
+    final insideControls = _keyNode.hasFocus && !_keyNode.hasPrimaryFocus;
+    if (_visible && !_locked) {
+      if (!insideControls) _seekFocus.requestFocus();
+    } else if (insideControls) {
+      _keyNode.requestFocus();
+    }
   }
 
   // ── Tap handling ───────────────────────────────────────────────────────────
@@ -231,6 +335,194 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
     });
   }
 
+  // ── D-pad scrubbing ────────────────────────────────────────────────────────
+
+  /// Moves the preview thumb by one step and restarts the commit countdown.
+  ///
+  /// Steps grow with the length of the burst (1× → 6× [PlayerConfig.seekSeconds]),
+  /// so holding the key crosses a two-hour film without forty presses.
+  void _remoteSeek({required bool forward}) {
+    if (ctrl.isLive) return; // nothing to scrub on a live edge
+    final duration = ctrl.duration;
+    final multiplier = 1 + (_remoteSeekRepeats ~/ 5).clamp(0, 5);
+    _remoteSeekRepeats++;
+
+    final step = Duration(seconds: cfg.seekSeconds * multiplier);
+    var target = (_seekPreview ?? ctrl.position) + (forward ? step : -step);
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration;
+
+    setState(() {
+      _seekPreview = target;
+      _seekCommitted = false;
+    });
+
+    final delta = target - ctrl.position;
+    _showSeekFlash(
+      delta.isNegative ? _SeekSide.back : _SeekSide.forward,
+      delta.abs().inSeconds,
+    );
+
+    _seekCommitTimer?.cancel();
+    _seekCommitTimer =
+        Timer(const Duration(milliseconds: 400), _commitRemoteSeek);
+  }
+
+  void _commitRemoteSeek() {
+    _remoteSeekRepeats = 0;
+    final target = _seekPreview;
+    if (target == null || !mounted) return;
+    _seekCommitted = true;
+    _seekCommittedAt = DateTime.now();
+    ctrl.seek(target);
+    _scheduleHide();
+  }
+
+  /// Clears the preview once the player's own position has caught up with the
+  /// committed target (or the seek is taking suspiciously long), so the thumb
+  /// never snaps back to where it was.
+  void _onControllerTick() {
+    if (!_seekCommitted || !mounted) return;
+    final target = _seekPreview;
+    if (target == null) return;
+    final caughtUp = (ctrl.position - target).abs() < const Duration(seconds: 1);
+    final committedAt = _seekCommittedAt;
+    final timedOut = committedAt != null &&
+        DateTime.now().difference(committedAt) >
+            const Duration(milliseconds: 2500);
+    if (caughtUp || timedOut) {
+      _seekCommitted = false;
+      _seekCommittedAt = null;
+      setState(() => _seekPreview = null);
+    }
+  }
+
+  // ── Remote keys ────────────────────────────────────────────────────────────
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final key = mapRemoteKey(event.logicalKey);
+    if (key == null) return KeyEventResult.ignored;
+
+    if (_locked) return _onLockedKey(key);
+
+    // Any recognised key counts as activity while the bar is up.
+    if (_visible && key != RemoteKey.back) _scheduleHide();
+
+    switch (key) {
+      // ── Transport: always act, whatever is on screen ──────────────────────
+      case RemoteKey.playPause:
+        ctrl.togglePlayPause();
+        _show();
+        return KeyEventResult.handled;
+      case RemoteKey.play:
+        ctrl.play();
+        _show();
+        return KeyEventResult.handled;
+      case RemoteKey.pause:
+      case RemoteKey.stop:
+        ctrl.pause();
+        _show();
+        return KeyEventResult.handled;
+      case RemoteKey.fastForward:
+        _startRemoteSeek(forward: true);
+        return KeyEventResult.handled;
+      case RemoteKey.rewind:
+        _startRemoteSeek(forward: false);
+        return KeyEventResult.handled;
+      case RemoteKey.next:
+        final onNext = cfg.onSkipNext;
+        if (onNext != null) {
+          onNext();
+          _show();
+        } else {
+          _startRemoteSeek(forward: true);
+        }
+        return KeyEventResult.handled;
+      case RemoteKey.previous:
+        final onPrevious = cfg.onSkipPrevious;
+        if (onPrevious != null) {
+          onPrevious();
+          _show();
+        } else {
+          _startRemoteSeek(forward: false);
+        }
+        return KeyEventResult.handled;
+
+      // ── D-pad ────────────────────────────────────────────────────────────
+      case RemoteKey.left:
+      case RemoteKey.right:
+        final forward = key == RemoteKey.right;
+        // A scrub already under way keeps the arrows, even if the focus
+        // request behind it has not been applied yet.
+        if (!_visible || _seekFocus.hasFocus || _seekPreview != null) {
+          _startRemoteSeek(forward: forward);
+          return KeyEventResult.handled;
+        }
+        // A button has focus → let the default traversal move sideways.
+        return KeyEventResult.ignored;
+      case RemoteKey.up:
+      case RemoteKey.down:
+        if (!_visible) {
+          _show();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored; // traversal between rows
+      case RemoteKey.select:
+        if (!_visible) {
+          _show();
+          return KeyEventResult.handled;
+        }
+        // Reaching this handler means no button consumed the key — either the
+        // seek bar has focus or nothing does.
+        ctrl.togglePlayPause();
+        _show();
+        return KeyEventResult.handled;
+
+      // ── Back ──────────────────────────────────────────────────────────────
+      case RemoteKey.back:
+        if (_visible) {
+          _hide();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored; // let the route close
+    }
+  }
+
+  /// Reveals the bar, parks focus on the seek bar and scrubs one step.
+  void _startRemoteSeek({required bool forward}) {
+    _show();
+    if (_tvActive && !ctrl.isLive) _seekFocus.requestFocus();
+    _remoteSeek(forward: forward);
+  }
+
+  KeyEventResult _onLockedKey(RemoteKey key) {
+    if (key == RemoteKey.back) {
+      // Never trap the user behind the lock: back leaves the player.
+      return KeyEventResult.ignored;
+    }
+    if (!_visible) {
+      _show(); // first press only reveals the unlock affordance
+      return KeyEventResult.handled;
+    }
+    if (key == RemoteKey.select) {
+      _unlock();
+      return KeyEventResult.handled;
+    }
+    _scheduleHide();
+    return KeyEventResult.handled;
+  }
+
+  // ── Sheets ─────────────────────────────────────────────────────────────────
+
+  /// Opens one of the settings sheets, holding the auto-hide off while it is up
+  /// so focus doesn't return to a bar that faded out behind it.
+  Future<void> _openSheet(Future<void> Function() open) async {
+    _hideTimer?.cancel();
+    await open();
+    if (mounted) _show();
+  }
+
   // ── Pinch-to-zoom (mobile) ───────────────────────────────────────────────────
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
@@ -265,6 +557,7 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
   void _onScrubStart() {
     _scrubbing = true;
     _hideTimer?.cancel();
+    if (!_visible) setState(() => _visible = true);
     _anim.forward();
   }
 
@@ -273,21 +566,11 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
     _scheduleHide();
   }
 
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _tapTimer?.cancel();
-    _seekFlashTimer?.cancel();
-    _fitFlashTimer?.cancel();
-    _anim.dispose();
-    super.dispose();
-  }
-
   // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
+    final Widget content = MouseRegion(
       onHover: (_) => _onHover(),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -344,6 +627,25 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
         ),
       ),
     );
+
+    if (!_remoteEnabled) return content;
+
+    // Back closes the controls before it closes the player — the behaviour a
+    // TV viewer expects, and the only way out of the bar without a pointer.
+    return PopScope(
+      canPop: !(_tvActive && _visible && !_locked),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _hide();
+      },
+      child: FocusTraversalGroup(
+        child: Focus(
+          focusNode: _keyNode,
+          autofocus: true,
+          onKeyEvent: _onKeyEvent,
+          child: content,
+        ),
+      ),
+    );
   }
 
   // ── Locked overlay ──────────────────────────────────────────────────────────
@@ -359,9 +661,9 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
           ),
         ),
         Center(
-          child: GestureDetector(
-            onTap: _unlock,
-            child: Column(
+          child: TvFocusable(
+            onPressed: _unlock,
+            builder: (_, focused) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
@@ -370,15 +672,18 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
                   decoration: BoxDecoration(
                     color: Colors.black.withAlpha(130),
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white30, width: 1.5),
+                    border: Border.all(
+                      color: focused ? Colors.white : Colors.white30,
+                      width: focused ? 2.5 : 1.5,
+                    ),
                   ),
                   child: const Icon(Icons.lock_rounded,
                       color: Colors.white, size: 26),
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  'Tap to unlock',
-                  style: TextStyle(
+                Text(
+                  _tvActive ? 'Press OK to unlock' : 'Tap to unlock',
+                  style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
@@ -427,10 +732,12 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             config: cfg,
             isFullscreen: widget.isFullscreen,
             onToggleFullscreen: widget.onToggleFullscreen,
-            onLock: cfg.showLockButton ? _lock : null,
+            // The lock exists to stop pocket taps; a remote has no such
+            // problem, and a locked screen is a trap without a touchscreen.
+            onLock: cfg.showLockButton && !_tvActive ? _lock : null,
             onEnterPip: cfg.showPipButton ? widget.onEnterPip : null,
-            // Aspect-ratio button: desktop/web only (mobile uses pinch).
-            onCycleFit: isDesktopOrWeb
+            // Aspect-ratio button: desktop/web and TV (mobile uses pinch).
+            onCycleFit: isDesktopOrWeb || _tvActive
                 ? () {
                     ctrl.cycleVideoFit();
                     _flashFit(_fitLabel(ctrl.videoFit));
@@ -440,11 +747,13 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
           ),
         ),
 
-        // Centre row
+        // Centre row. On TV it stays as a state indicator but leaves the focus
+        // order: left/right belong to the seek bar there, not to these buttons.
         Center(
           child: _CentreRow(
             controller: ctrl,
             seekSeconds: cfg.seekSeconds,
+            focusable: !_tvActive,
             onActivity: _show,
             onRewind: () =>
                 _seekBy(Duration(seconds: -cfg.seekSeconds), _SeekSide.back),
@@ -459,9 +768,13 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
           child: _BottomBar(
             controller: ctrl,
             config: cfg,
+            tvActive: _tvActive,
+            seekFocusNode: _seekFocus,
+            previewPosition: _seekPreview,
             onActivity: _show,
             onScrubStart: _onScrubStart,
             onScrubEnd: _onScrubEnd,
+            onOpenSheet: _openSheet,
           ),
         ),
       ],
@@ -575,6 +888,7 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = config.accentColor;
     return SafeArea(
       bottom: false,
       child: Padding(
@@ -586,12 +900,14 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.fullscreen_exit_rounded,
                 size: 24,
                 tooltip: 'Exit fullscreen',
+                accentColor: accent,
                 onPressed: onToggleFullscreen,
               )
             else if (Navigator.of(context).canPop())
               _IconBtn(
                 icon: Icons.arrow_back_ios_new_rounded,
                 size: 20,
+                accentColor: accent,
                 onPressed: () => Navigator.of(context).pop(),
               ),
 
@@ -612,12 +928,13 @@ class _TopBar extends StatelessWidget {
             ] else
               const Spacer(),
 
-            // Aspect ratio (desktop/web)
+            // Aspect ratio (desktop/web/TV)
             if (onCycleFit != null)
               _IconBtn(
                 icon: Icons.aspect_ratio_rounded,
                 size: 22,
                 tooltip: 'Aspect ratio',
+                accentColor: accent,
                 onPressed: onCycleFit,
               ),
 
@@ -632,6 +949,7 @@ class _TopBar extends StatelessWidget {
                         icon: Icons.picture_in_picture_alt_rounded,
                         size: 22,
                         tooltip: 'Picture-in-Picture',
+                        accentColor: accent,
                         onPressed: onEnterPip,
                       )
                     : const SizedBox.shrink(),
@@ -643,6 +961,7 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.lock_outline_rounded,
                 size: 22,
                 tooltip: 'Lock screen',
+                accentColor: accent,
                 onPressed: onLock,
               ),
 
@@ -652,6 +971,7 @@ class _TopBar extends StatelessWidget {
                 icon: Icons.fullscreen_rounded,
                 size: 24,
                 tooltip: 'Fullscreen',
+                accentColor: accent,
                 onPressed: onToggleFullscreen,
               ),
           ],
@@ -668,6 +988,7 @@ class _TopBar extends StatelessWidget {
 class _CentreRow extends StatelessWidget {
   final CustomPlayerController controller;
   final int seekSeconds;
+  final bool focusable;
   final VoidCallback onActivity;
   final VoidCallback onRewind;
   final VoidCallback onForward;
@@ -675,6 +996,7 @@ class _CentreRow extends StatelessWidget {
   const _CentreRow({
     required this.controller,
     required this.seekSeconds,
+    required this.focusable,
     required this.onActivity,
     required this.onRewind,
     required this.onForward,
@@ -688,13 +1010,21 @@ class _CentreRow extends StatelessWidget {
         _SkipButton(
             seconds: seekSeconds,
             forward: false,
+            focusable: focusable,
+            accentColor: controller.config.accentColor,
             onTap: () { onRewind(); onActivity(); }),
         const SizedBox(width: 28),
-        _CentreButton(controller: controller, onActivity: onActivity),
+        _CentreButton(
+          controller: controller,
+          focusable: focusable,
+          onActivity: onActivity,
+        ),
         const SizedBox(width: 28),
         _SkipButton(
             seconds: seekSeconds,
             forward: true,
+            focusable: focusable,
+            accentColor: controller.config.accentColor,
             onTap: () { onForward(); onActivity(); }),
       ],
     );
@@ -703,9 +1033,14 @@ class _CentreRow extends StatelessWidget {
 
 class _CentreButton extends StatelessWidget {
   final CustomPlayerController controller;
+  final bool focusable;
   final VoidCallback onActivity;
 
-  const _CentreButton({required this.controller, required this.onActivity});
+  const _CentreButton({
+    required this.controller,
+    required this.focusable,
+    required this.onActivity,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -733,15 +1068,16 @@ class _CentreButton extends StatelessWidget {
             action = () { controller.play(); onActivity(); };
         }
 
-        return GestureDetector(
-          onTap: action,
-          child: Container(
+        return TvFocusable(
+          onPressed: action,
+          canRequestFocus: focusable,
+          builder: (_, focused) => Container(
             width: 66,
             height: 66,
-            decoration: BoxDecoration(
-              color: Colors.black.withAlpha(120),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white24, width: 1.5),
+            decoration: tvFocusDecoration(
+              focused: focused,
+              accentColor: controller.config.accentColor,
+              background: Colors.black.withAlpha(120),
             ),
             child: Icon(icon, color: Colors.white, size: 36),
           ),
@@ -754,11 +1090,15 @@ class _CentreButton extends StatelessWidget {
 class _SkipButton extends StatelessWidget {
   final int seconds;
   final bool forward;
+  final bool focusable;
+  final Color accentColor;
   final VoidCallback onTap;
 
   const _SkipButton({
     required this.seconds,
     required this.forward,
+    required this.focusable,
+    required this.accentColor,
     required this.onTap,
   });
 
@@ -778,15 +1118,16 @@ class _SkipButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+    return TvFocusable(
+      onPressed: onTap,
+      canRequestFocus: focusable,
+      builder: (_, focused) => Container(
         width: 48,
         height: 48,
-        decoration: BoxDecoration(
-          color: Colors.black.withAlpha(100),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24, width: 1),
+        decoration: tvFocusDecoration(
+          focused: focused,
+          accentColor: accentColor,
+          background: Colors.black.withAlpha(100),
         ),
         child: Icon(_icon, color: Colors.white, size: 24),
       ),
@@ -801,16 +1142,27 @@ class _SkipButton extends StatelessWidget {
 class _BottomBar extends StatefulWidget {
   final CustomPlayerController controller;
   final PlayerConfig config;
+  final bool tvActive;
+  final FocusNode seekFocusNode;
+
+  /// Target of an uncommitted D-pad scrub, shown instead of the live position.
+  final Duration? previewPosition;
+
   final VoidCallback onActivity;
   final VoidCallback onScrubStart;
   final VoidCallback onScrubEnd;
+  final Future<void> Function(Future<void> Function()) onOpenSheet;
 
   const _BottomBar({
     required this.controller,
     required this.config,
+    required this.tvActive,
+    required this.seekFocusNode,
+    required this.previewPosition,
     required this.onActivity,
     required this.onScrubStart,
     required this.onScrubEnd,
+    required this.onOpenSheet,
   });
 
   @override
@@ -826,6 +1178,7 @@ class _BottomBarState extends State<_BottomBar> {
   @override
   Widget build(BuildContext context) {
     final showVolume = cfg.showVolumeControl ?? isDesktopOrWeb;
+    final preview = widget.previewPosition;
 
     return SafeArea(
       top: false,
@@ -842,20 +1195,37 @@ class _BottomBarState extends State<_BottomBar> {
               builder: (_, _) => Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  PlayerProgressBar(
-                    position: ctrl.position,
-                    duration: ctrl.duration,
-                    buffered: ctrl.buffered,
-                    accentColor: cfg.accentColor,
-                    storyboard: ctrl.storyboard,
-                    onScrubStart: widget.onScrubStart,
-                    onScrubEnd: widget.onScrubEnd,
-                    onSeek: ctrl.isLive
-                        ? null
-                        : (d) {
-                            ctrl.seek(d);
-                            widget.onActivity();
-                          },
+                  // The seek bar doubles as a focus target on TV: while it is
+                  // focused the overlay routes left/right into a scrub.
+                  ListenableBuilder(
+                    listenable: widget.seekFocusNode,
+                    builder: (_, _) => Focus(
+                      focusNode: widget.seekFocusNode,
+                      // Always focusable, never traversed to on touch: the
+                      // overlay hands it focus itself, and it must accept the
+                      // request in the same frame the remote is first used —
+                      // before this widget has rebuilt with tvActive on.
+                      skipTraversal: !widget.tvActive,
+                      child: PlayerProgressBar(
+                        position: ctrl.position,
+                        duration: ctrl.duration,
+                        buffered: ctrl.buffered,
+                        accentColor: cfg.accentColor,
+                        storyboard: ctrl.storyboard,
+                        previewPosition: preview,
+                        tvFocused: widget.tvActive
+                            ? widget.seekFocusNode.hasFocus
+                            : null,
+                        onScrubStart: widget.onScrubStart,
+                        onScrubEnd: widget.onScrubEnd,
+                        onSeek: ctrl.isLive
+                            ? null
+                            : (d) {
+                                ctrl.seek(d);
+                                widget.onActivity();
+                              },
+                      ),
+                    ),
                   ),
 
                   // Time row
@@ -864,12 +1234,16 @@ class _BottomBarState extends State<_BottomBar> {
                     child: Row(
                       children: [
                         Text(
-                          formatDuration(ctrl.position),
-                          style: const TextStyle(
-                            color: Colors.white,
+                          formatDuration(preview ?? ctrl.position),
+                          style: TextStyle(
+                            color: preview != null
+                                ? cfg.accentColor
+                                : Colors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
-                            fontFeatures: [FontFeature.tabularFigures()],
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
                           ),
                         ),
                         if (ctrl.isLive)
@@ -926,28 +1300,28 @@ class _BottomBarState extends State<_BottomBar> {
                       _ActionButton(
                         icon: Icons.speed_rounded,
                         label: speed == 1.0 ? 'Speed' : 'Speed · $speed×',
-                        onTap: () {
-                          widget.onActivity();
-                          showSpeedSheet(context, ctrl);
-                        },
+                        accentColor: cfg.accentColor,
+                        onTap: () => widget.onOpenSheet(
+                          () => showSpeedSheet(context, ctrl),
+                        ),
                       ),
                       if (showAudio)
                         _ActionButton(
                           icon: Icons.multitrack_audio_rounded,
                           label: 'Audio',
-                          onTap: () {
-                            widget.onActivity();
-                            showAudioSheet(context, ctrl);
-                          },
+                          accentColor: cfg.accentColor,
+                          onTap: () => widget.onOpenSheet(
+                            () => showAudioSheet(context, ctrl),
+                          ),
                         ),
                       if (showSubs)
                         _ActionButton(
                           icon: Icons.closed_caption_rounded,
                           label: 'Subtitles',
-                          onTap: () {
-                            widget.onActivity();
-                            showSubtitleSheet(context, ctrl, config: cfg);
-                          },
+                          accentColor: cfg.accentColor,
+                          onTap: () => widget.onOpenSheet(
+                            () => showSubtitleSheet(context, ctrl, config: cfg),
+                          ),
                         ),
                     ],
                   ),
@@ -968,21 +1342,27 @@ class _BottomBarState extends State<_BottomBar> {
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
+  final Color accentColor;
   final VoidCallback onTap;
 
   const _ActionButton({
     required this.icon,
     required this.label,
+    required this.accentColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
+    return TvFocusable(
+      onPressed: onTap,
+      builder: (_, focused) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: tvFocusDecoration(
+          focused: focused,
+          accentColor: accentColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1069,6 +1449,7 @@ class _VolumeButtonState extends State<_VolumeButton> {
                   : Icons.volume_up_rounded,
           size: 22,
           compact: true,
+          accentColor: widget.controller.config.accentColor,
           onPressed: () {
             setState(() => _expanded = !_expanded);
             if (!_expanded) widget.controller.toggleMute();
@@ -1091,15 +1472,19 @@ class _VolumeButtonState extends State<_VolumeButton> {
               thumbColor: Colors.white,
               overlayColor: Colors.white24,
             ),
-            child: Slider(
-              value: muted ? 0 : vol,
-              onChanged: (v) {
-                widget.controller.setVolume(v);
-                if (widget.controller.muted && v > 0) {
-                  widget.controller.toggleMute();
-                }
-                widget.onActivity();
-              },
+            // Out of the focus order: the arrow keys belong to the player's own
+            // seek handling, not to a slider that happens to be on screen.
+            child: ExcludeFocus(
+              child: Slider(
+                value: muted ? 0 : vol,
+                onChanged: (v) {
+                  widget.controller.setVolume(v);
+                  if (widget.controller.muted && v > 0) {
+                    widget.controller.toggleMute();
+                  }
+                  widget.onActivity();
+                },
+              ),
             ),
           ),
         ),
@@ -1136,6 +1521,7 @@ class _IconBtn extends StatelessWidget {
   final double size;
   final String? tooltip;
   final bool compact;
+  final Color accentColor;
   final VoidCallback? onPressed;
 
   const _IconBtn({
@@ -1143,18 +1529,33 @@ class _IconBtn extends StatelessWidget {
     required this.size,
     this.tooltip,
     this.compact = false,
+    this.accentColor = Colors.white,
     this.onPressed,
   });
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(icon),
-      color: Colors.white,
-      iconSize: size,
-      tooltip: tooltip,
-      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
-      onPressed: onPressed,
+    final box = compact ? 36.0 : 44.0;
+    return Padding(
+      padding: EdgeInsets.all(compact ? 2 : 4),
+      child: TvFocusable(
+        onPressed: onPressed,
+        tooltip: tooltip,
+        builder: (_, focused) => Container(
+          width: box,
+          height: box,
+          alignment: Alignment.center,
+          decoration: tvFocusDecoration(
+            focused: focused,
+            accentColor: accentColor,
+          ),
+          child: Icon(
+            icon,
+            size: size,
+            color: onPressed == null ? Colors.white38 : Colors.white,
+          ),
+        ),
+      ),
     );
   }
 }

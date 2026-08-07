@@ -1,5 +1,23 @@
 ## Unreleased
 
+* **Remote control / Android TV.** The built-in controls are now navigable with
+  a D-pad: every control is a focus target with a visible ring, the seek bar
+  takes focus of its own so ← / → scrub instead of hopping between buttons, and
+  OK, Back and the media transport keys (▶⏸ ▶ ⏸ ⏹ ⏪ ⏩ ⏮ ⏭) are wired.
+  Holding an arrow accelerates the step (1× → 6× `seekSeconds`) and commits a
+  single seek ~400 ms after the last press, previewing the target — thumbnail
+  included — on the bar meanwhile. Back closes the controls before it closes
+  the player. The settings sheets open with the current entry focused.
+* **`PlayerConfig.tvMode`** (`TvMode.auto` by default) decides when that focus
+  skin appears: `auto` switches it on at the first key press, `enabled` has it
+  on from the first frame (what an Android TV app should pass), `disabled`
+  turns key handling off entirely. Touch behaviour is unchanged in every mode.
+  On TV the lock button is hidden and the centre buttons leave the focus order.
+* **`PlayerConfig.onSkipNext` / `onSkipPrevious`** — the remote's ⏮ / ⏭ keys,
+  for hosts with a playlist of their own. Unset, those keys seek.
+* The example app's manifest now declares the leanback launcher and optional
+  touchscreen, so it can be installed and driven on an Android TV.
+
 * **`PlayerConfig.onPlaybackEvent`** — a neutral callback that receives every
   playback event the player measures (`start` / `progress` / `end` / `error`),
   so a host app can report to its own API without the built-in HTTP reporter.

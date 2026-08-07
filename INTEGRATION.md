@@ -348,7 +348,79 @@ built by the telemetry layer. The old names `TelemetryEvent` /
 
 ---
 
-## 12. Configuration reference
+## 12. Android TV / remote control
+
+### Manifest
+
+```xml
+<manifest ...>
+    <!-- Both optional: the same APK still installs on phones -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+
+    <application android:banner="@drawable/tv_banner" ...>   <!-- 320×180 -->
+        <activity ...>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+```
+
+### Player
+
+```dart
+_controller = CustomPlayerController(
+  config: PlayerConfig(
+    tvMode: TvMode.enabled,       // focus skin on from the first frame
+    autoOrientation: false,       // a TV does not rotate
+    // Optional: wire the remote's ⏮ / ⏭ keys to your own playlist.
+    onSkipNext: _playNextEpisode,
+    onSkipPrevious: _playPreviousEpisode,
+  ),
+);
+```
+
+`TvMode.auto` (the default) also works on a TV — it just waits for the first
+key press to switch the skin on. Pass `TvMode.enabled` when you know you are on
+a TV so the controls are navigable before anything is pressed, and
+`TvMode.disabled` to opt out of key handling entirely.
+
+### What the remote does
+
+| Key | Controls hidden | Controls visible |
+|---|---|---|
+| ← / → | reveal + scrub | scrub (seek bar) · move focus (button) |
+| ↑ / ↓ | reveal | move focus between rows |
+| OK | reveal | play/pause (seek bar) · press the button |
+| Back | closes the player | hides the controls |
+| ▶⏸ ▶ ⏸ ⏹ | act | act |
+| ⏪ ⏩ | scrub | scrub |
+| ⏮ ⏭ | `onSkipPrevious` / `onSkipNext`, else scrub | idem |
+
+Holding ← / → accelerates (1× → 6× `seekSeconds`) and commits one seek ~400 ms
+after the last press, previewing the target on the bar meanwhile.
+
+Volume, home and channel keys are never intercepted — they stay with the
+system, which is what a TV user expects.
+
+### Notes
+
+* The 🔒 lock button is hidden while the TV skin is on: without a touchscreen a
+  locked player is a trap. `showLockButton` still governs the touch case.
+* The centre rewind/play/forward buttons stay visible as state indicators but
+  leave the focus order — the arrows belong to the seek bar there.
+* `showControls: false` still turns everything off, key handling included, for
+  hosts that ship their own focusable TV layout.
+* Nothing here is Android-only in Dart terms: the same keys work from a
+  keyboard on desktop, which is the quickest way to test the flows.
+
+---
+
+## 13. Configuration reference
 
 | `PlayerConfig` field            | Default          | Description                                        |
 |---------------------------------|------------------|----------------------------------------------------|
@@ -366,5 +438,8 @@ built by the telemetry layer. The old names `TelemetryEvent` /
 | `accentColor`                   | `Color(0xFFE50914)` | Progress bar + UI accent                       |
 | `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
+| `tvMode`                        | `TvMode.auto`    | Remote/D-pad handling: `auto` / `enabled` / `disabled` (see §12) |
+| `onSkipNext`                    | `null`           | Remote ⏭ key; falls back to a forward seek (see §12) |
+| `onSkipPrevious`                | `null`           | Remote ⏮ key; falls back to a backward seek (see §12) |
 | `telemetry`                     | `null`           | `TelemetryConfig` for playback reporting (see §11) |
 | `onPlaybackEvent`               | `null`           | `void Function(PlaybackEvent)` — every measured playback event, to report it to your own API (see §11) |

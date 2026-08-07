@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show DeviceOrientation;
 import '../playback/playback_event.dart';
 import '../telemetry/telemetry_config.dart';
 import 'player_action.dart';
+import 'tv_mode.dart';
 import 'video_fit.dart';
 
 /// Signature of [PlayerConfig.onPlaybackEvent].
@@ -97,6 +98,41 @@ class PlayerConfig {
 
   /// Show a buffer/loading indicator while the player is buffering.
   final bool showBufferingIndicator;
+
+  // ── TV / remote control ───────────────────────────────────────────────────
+
+  /// How the built-in controls respond to a TV remote or D-pad.
+  ///
+  /// Defaults to [TvMode.auto]: keys are handled on every platform, and the
+  /// focus-driven skin (focus rings, focusable seek bar, autofocused controls)
+  /// appears the first time a key is pressed. **Android TV apps should pass
+  /// [TvMode.enabled]** so the player is navigable from the first frame.
+  ///
+  /// The remote map:
+  ///
+  /// | Key | Controls hidden | Controls visible |
+  /// |---|---|---|
+  /// | ← / → | reveal + scrub | scrub (seek bar focused) or move focus |
+  /// | ↑ / ↓ | reveal | move focus between rows |
+  /// | OK / center | reveal | play/pause (seek bar) or press the button |
+  /// | Back | passes through (closes the screen) | hide the controls |
+  /// | ▶⏸ ▶ ⏸ ⏹ | act immediately | act immediately |
+  /// | ⏪ ⏩ | scrub | scrub |
+  /// | ⏮ ⏭ | [onSkipPrevious] / [onSkipNext], else scrub | idem |
+  ///
+  /// Holding ← / → accelerates: the step grows the longer the key repeats, and
+  /// the seek is committed once ~400 ms pass without a press, so a long scrub
+  /// is one seek instead of dozens.
+  final TvMode tvMode;
+
+  /// Invoked by the remote's ⏭ key. When null, the key seeks forward instead.
+  ///
+  /// The player has no playlist of its own — wire this to whatever "next
+  /// episode" means in your app.
+  final VoidCallback? onSkipNext;
+
+  /// Invoked by the remote's ⏮ key. When null, the key seeks backwards.
+  final VoidCallback? onSkipPrevious;
 
   /// Whether to show the source title in the top controls bar.
   final bool showTitle;
@@ -231,6 +267,9 @@ class PlayerConfig {
     this.controlsTimeoutSeconds = 4,
     this.subtitleActions = const [],
     this.showBufferingIndicator = true,
+    this.tvMode = TvMode.auto,
+    this.onSkipNext,
+    this.onSkipPrevious,
     this.showTitle = true,
     this.showLockButton = true,
     this.showPipButton = true,
@@ -266,6 +305,9 @@ class PlayerConfig {
     int? controlsTimeoutSeconds,
     List<PlayerSheetAction>? subtitleActions,
     bool? showBufferingIndicator,
+    TvMode? tvMode,
+    VoidCallback? onSkipNext,
+    VoidCallback? onSkipPrevious,
     bool? showTitle,
     bool? showLockButton,
     bool? showPipButton,
@@ -303,6 +345,9 @@ class PlayerConfig {
       subtitleActions: subtitleActions ?? this.subtitleActions,
       showBufferingIndicator:
           showBufferingIndicator ?? this.showBufferingIndicator,
+      tvMode: tvMode ?? this.tvMode,
+      onSkipNext: onSkipNext ?? this.onSkipNext,
+      onSkipPrevious: onSkipPrevious ?? this.onSkipPrevious,
       showTitle: showTitle ?? this.showTitle,
       showLockButton: showLockButton ?? this.showLockButton,
       showPipButton: showPipButton ?? this.showPipButton,

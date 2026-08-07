@@ -17,6 +17,15 @@ class PlayerProgressBar extends StatefulWidget {
   /// thumb while the user is scrubbing.
   final Storyboard? storyboard;
 
+  /// Target of an in-flight D-pad scrub. While set, the thumb, the elapsed
+  /// time and the thumbnail follow it instead of the live position — the seek
+  /// itself only happens once the user stops pressing.
+  final Duration? previewPosition;
+
+  /// Focus state under a remote: null when the bar is not a focus target
+  /// (touch/mouse), true/false when it is.
+  final bool? tvFocused;
+
   final ValueChanged<Duration>? onSeek;
   final VoidCallback? onScrubStart;
   final VoidCallback? onScrubEnd;
@@ -28,6 +37,8 @@ class PlayerProgressBar extends StatefulWidget {
     required this.buffered,
     required this.accentColor,
     this.storyboard,
+    this.previewPosition,
+    this.tvFocused,
     this.onSeek,
     this.onScrubStart,
     this.onScrubEnd,
@@ -76,8 +87,17 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
         .clamp(0.0, 1.0);
   }
 
+  /// The D-pad scrub target as a track fraction, when one is pending.
+  double? get _previewProgress {
+    final preview = widget.previewPosition;
+    if (preview == null || widget.duration.inMilliseconds == 0) return null;
+    return (preview.inMilliseconds / widget.duration.inMilliseconds)
+        .clamp(0.0, 1.0);
+  }
+
   Duration get _scrubPosition {
-    final ms = ((_dragValue ?? _progress) * widget.duration.inMilliseconds)
+    final ms = ((_dragValue ?? _previewProgress ?? _progress) *
+            widget.duration.inMilliseconds)
         .round()
         .clamp(0, widget.duration.inMilliseconds);
     return Duration(milliseconds: ms);
@@ -110,10 +130,15 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
 
   @override
   Widget build(BuildContext context) {
-    final displayValue = _dragValue ?? _progress;
-    final isScrubbing = _dragging;
+    final displayValue = _dragValue ?? _previewProgress ?? _progress;
+    // A D-pad scrub shows the same thumbnail popup a finger drag does.
+    final isScrubbing = _dragging || widget.previewPosition != null;
+    final focused = widget.tvFocused ?? false;
 
-    const thumbR = 7.0;
+    // The focused bar grows: it has to read as "this is what the arrows move"
+    // from across a room.
+    final thumbR = focused ? 10.0 : 7.0;
+    final trackH = focused ? 6.0 : 3.0;
     const overlayR = 16.0;
     // The Slider horizontal padding = overlayRadius (Flutter internal).
     const hPad = overlayR;
@@ -146,24 +171,30 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
             // ── Slider ───────────────────────────────────────────────────────
             SliderTheme(
               data: SliderThemeData(
-                trackHeight: 3.0,
-                thumbShape: const _TinyThumbShape(thumbRadius: thumbR),
+                trackHeight: trackH,
+                thumbShape: _TinyThumbShape(thumbRadius: thumbR),
                 overlayShape:
                     const RoundSliderOverlayShape(overlayRadius: overlayR),
                 activeTrackColor: widget.accentColor,
-                inactiveTrackColor: Colors.white24,
+                inactiveTrackColor: focused ? Colors.white38 : Colors.white24,
                 thumbColor: Colors.white,
                 overlayColor: widget.accentColor.withAlpha(51),
                 secondaryActiveTrackColor: Colors.white38,
               ),
-              child: Slider(
-                value: displayValue,
-                secondaryTrackValue: _bufferedProgress,
-                onChanged: widget.onSeek != null ? _onChanged : null,
-                onChangeStart:
-                    widget.onSeek != null ? _onChangeStart : null,
-                onChangeEnd:
-                    widget.onSeek != null ? _onChangeEnd : null,
+              // On TV the bar is driven by the overlay's own key handling; the
+              // Slider must not also claim the arrow keys (its own keyboard
+              // step moves the thumb without ever committing a seek).
+              child: ExcludeFocus(
+                excluding: widget.tvFocused != null,
+                child: Slider(
+                  value: displayValue,
+                  secondaryTrackValue: _bufferedProgress,
+                  onChanged: widget.onSeek != null ? _onChanged : null,
+                  onChangeStart:
+                      widget.onSeek != null ? _onChangeStart : null,
+                  onChangeEnd:
+                      widget.onSeek != null ? _onChangeEnd : null,
+                ),
               ),
             ),
           ],

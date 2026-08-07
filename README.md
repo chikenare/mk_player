@@ -14,6 +14,7 @@ A self-contained, highly reusable Flutter video player built on [better_player_p
 | **Auth** | Custom HTTP headers per source (`Authorization`, `Cookie`, `User-Agent`, …) |
 | **Tracks** | Dynamic audio, subtitle and video-quality switching |
 | **Controls** | Play/pause, seek, volume, mute, speed (0.25×–4×), double-tap ±10 s |
+| **Android TV** | Full D-pad / remote navigation: focusable controls with a focus ring, arrow-key scrubbing with acceleration, media transport keys, back-hides-controls |
 | **Thumbnails** | WebVTT storyboard scrubber preview with sprite sheet support |
 | **Fullscreen** | Landscape orientation lock + immersive SystemChrome |
 | **Wakelock** | Screen stays on during playback, released on pause/error/dispose |
@@ -75,6 +76,39 @@ For HTTP (non-HTTPS) streams, allow cleartext traffic in
     android:usesCleartextTraffic="true"
     ...>
 ```
+
+#### Android TV setup
+
+The player needs nothing extra to answer a remote — but the app does need to be
+installable on a TV and to reach the leanback launcher. In
+`android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<manifest ...>
+    <!-- Both optional, so the same APK still installs on phones -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false"/>
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false"/>
+
+    <application
+        android:banner="@drawable/tv_banner"  <!-- 320×180, required by Play -->
+        ...>
+        <activity ...>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+```
+
+Then pass `tvMode: TvMode.enabled` in your `PlayerConfig` — see
+[Remote control / Android TV](#remote-control--android-tv) for the full key map.
 
 ---
 
@@ -292,7 +326,10 @@ CustomPlayerController(
 | `initialVideoFit` | `VideoFit.contain` | Initial scaling: `contain` / `cover` / `fill` |
 | `accentColor` | `Color(0xFFE50914)` | Accent colour for UI elements |
 | `subtitlesConfiguration` | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance — see [Subtitle styling](#subtitle-styling) |
-| `showControls` | `true` | Render the built-in controls overlay. `false` leaves only the video surface (plus poster/buffering/error) so the host can stack its own UI — e.g. a D-pad-navigable layout on Android TV |
+| `showControls` | `true` | Render the built-in controls overlay. `false` leaves only the video surface (plus poster/buffering/error) so the host can stack its own UI |
+| `tvMode` | `TvMode.auto` | How the controls answer a remote/D-pad: `auto` (focus skin appears on the first key press), `enabled` (always — use it on Android TV), `disabled` (touch only) — see [Remote control / Android TV](#remote-control--android-tv) |
+| `onSkipNext` | `null` | Called by the remote's ⏭ key; when null the key seeks forward instead |
+| `onSkipPrevious` | `null` | Called by the remote's ⏮ key; when null the key seeks backwards |
 | `controlsTimeoutSeconds` | `4` | Seconds of inactivity before auto-hide |
 | `subtitleActions` | `[]` | Extra `PlayerSheetAction` entries appended to the subtitle sheet — see [Subtitles](#subtitles) |
 | `showBufferingIndicator` | `true` | Show spinner while buffering |
@@ -724,13 +761,61 @@ For sources opened with `isLive: true`, a red **LIVE** badge replaces the
 duration and the scrubber is disabled. Liveness is never auto-detected — set
 the flag explicitly on the `PlayerSource`.
 
+### Remote control / Android TV
+
+The same overlay is driven by a D-pad. Every control is focusable, the focused
+one wears a white ring, and the seek bar is a focus target of its own so the
+arrows scrub instead of jumping between buttons.
+
+```dart
+CustomPlayerController(
+  config: const PlayerConfig(
+    tvMode: TvMode.enabled,   // Android TV / leanback app
+  ),
+)
+```
+
+| Key | Controls hidden | Controls visible |
+|---|---|---|
+| **← / →** | reveal the bar and start scrubbing | scrub (seek bar focused) · move focus (button focused) |
+| **↑ / ↓** | reveal the bar | move focus between rows |
+| **OK / centre** | reveal the bar | play/pause (seek bar focused) · press the button |
+| **Back** | closes the player | hides the controls |
+| **▶⏸ / ▶ / ⏸ / ⏹** | act immediately | act immediately |
+| **⏪ / ⏩** | scrub | scrub |
+| **⏮ / ⏭** | `onSkipPrevious` / `onSkipNext`, else scrub | idem |
+
+Holding **←/→** accelerates — the step grows from 1× to 6× `seekSeconds` — and
+the seek is committed ~400 ms after the last press, so a long scrub is a single
+seek with a live preview on the bar (thumbnail included, when a storyboard is
+attached) instead of thirty separate ones.
+
+`tvMode` decides when the focus skin appears:
+
+| Value | Behaviour |
+|---|---|
+| `TvMode.auto` *(default)* | Keys are always handled; the focus ring, the focusable seek bar and the back-hides-controls rule switch on the first time a key is pressed. A phone build is untouched until someone plugs in a remote or a keyboard. |
+| `TvMode.enabled` | On from the first frame. **Use this in an Android TV app** — the controls are navigable before any key is pressed. |
+| `TvMode.disabled` | No key handling at all, touch only. |
+
+Two details worth knowing on TV: the 🔒 lock button is hidden (a locked screen
+is a trap without a touchscreen), and the centre rewind/play/forward buttons
+stay on screen as state indicators but leave the focus order, since the arrows
+belong to the seek bar there.
+
+The settings sheets (Speed / Audio / Subtitles) are navigable too: opening one
+focuses the entry that is currently selected, and **Back** closes it.
+
+For the manifest flags an Android TV app needs, see
+[Android TV setup](#android-tv-setup).
+
 ### Bringing your own controls
 
-The built-in overlay is touch-first. Where that does not fit — Android TV with
-a D-pad, a kiosk layout, an embedded preview — set `showControls: false` and
-stack your own UI on top. `PlayerView` still renders the video surface, poster,
-buffering spinner and error overlay; everything else is yours, driven by the
-same `CustomPlayerController`:
+The built-in overlay handles touch, mouse and remotes. Where it still does not
+fit — a kiosk layout, an embedded preview, a bespoke TV design — set
+`showControls: false` and stack your own UI on top. `PlayerView` still renders
+the video surface, poster, buffering spinner and error overlay; everything else
+is yours, driven by the same `CustomPlayerController`:
 
 ```dart
 Stack(

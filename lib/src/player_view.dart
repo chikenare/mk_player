@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'controller.dart';
 import 'models/player_config.dart';
+import 'models/tv_mode.dart';
 import 'platform.dart';
 import 'widgets/controls_overlay.dart';
 import 'widgets/error_overlay.dart';
@@ -243,6 +244,7 @@ class _VideoCanvasState extends State<_VideoCanvas> {
                   onBack: Navigator.of(ctx).canPop()
                       ? () => Navigator.of(ctx).pop()
                       : null,
+                  autofocusRetry: config.tvMode != TvMode.disabled,
                 );
               },
             ),

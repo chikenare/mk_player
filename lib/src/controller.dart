@@ -614,8 +614,17 @@ class CustomPlayerController extends ChangeNotifier {
     }
   }
 
+  /// Whether the native player exists yet.
+  ///
+  /// Every playback call on better_player throws a `StateError` before the
+  /// data source is initialised — and a remote reaches play/pause/seek while
+  /// the spinner is still up, so the guard has to be here rather than in each
+  /// caller. `isPlaying()` throws *synchronously*, which would take the key
+  /// handler down with it.
+  bool get _playerReady => betterPlayerController.videoPlayerController != null;
+
   Future<void> play() async {
-    if (_disposed) return;
+    if (_disposed || !_playerReady) return;
     // ExoPlayer ignores play() while ended, which would leave the UI claiming
     // "playing" over a still frame — replay from the start instead.
     if (_state == MkPlayerState.completed) {
@@ -625,12 +634,12 @@ class CustomPlayerController extends ChangeNotifier {
   }
 
   Future<void> pause() async {
-    if (_disposed) return;
+    if (_disposed || !_playerReady) return;
     await betterPlayerController.pause();
   }
 
   Future<void> togglePlayPause() async {
-    if (_disposed) return;
+    if (_disposed || !_playerReady) return;
     if (betterPlayerController.isPlaying() ?? false) {
       await betterPlayerController.pause();
     } else {
@@ -640,7 +649,7 @@ class CustomPlayerController extends ChangeNotifier {
 
   /// Seeks to [position], clamped to the valid `[0, duration]` range.
   Future<void> seek(Duration position) async {
-    if (_disposed) return;
+    if (_disposed || !_playerReady) return;
     await betterPlayerController.seekTo(_clampPosition(position));
   }
 
@@ -650,24 +659,32 @@ class CustomPlayerController extends ChangeNotifier {
     return p;
   }
 
+  // The volume/speed setters keep their value either way: it is re-applied to
+  // the native player on `initialized`, so a change made during loading is not
+  // lost, only deferred.
+
   Future<void> setVolume(double value) async {
     if (_disposed) return;
     _volume = value.clamp(0.0, 1.0);
-    if (!_muted) await betterPlayerController.setVolume(_volume);
+    if (!_muted && _playerReady) {
+      await betterPlayerController.setVolume(_volume);
+    }
     _notify();
   }
 
   Future<void> toggleMute() async {
     if (_disposed) return;
     _muted = !_muted;
-    await betterPlayerController.setVolume(_muted ? 0 : _volume);
+    if (_playerReady) {
+      await betterPlayerController.setVolume(_muted ? 0 : _volume);
+    }
     _notify();
   }
 
   Future<void> setSpeed(double value) async {
     if (_disposed) return;
     _speed = value.clamp(0.25, 4.0);
-    await betterPlayerController.setSpeed(_speed);
+    if (_playerReady) await betterPlayerController.setSpeed(_speed);
     _notify();
   }
 

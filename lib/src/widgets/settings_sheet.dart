@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../controller.dart';
 import '../models/player_config.dart';
+import '../tv/tv_focusable.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry points — focused sheets (Netflix/Apple TV+ style)
@@ -46,6 +47,8 @@ Future<void> showAudioSheet(
           if (tracks.isEmpty) {
             return const _EmptyHint('No audio tracks available');
           }
+          final selectedId = controller.selectedAudioTrack?.id;
+          final hasSelection = tracks.any((t) => t.id == selectedId);
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -53,8 +56,11 @@ Future<void> showAudioSheet(
                 _TrackTile(
                   label: _audioLabel(tracks[i], i),
                   icon: Icons.headphones_rounded,
-                  isSelected: tracks[i].id == controller.selectedAudioTrack?.id,
+                  isSelected: tracks[i].id == selectedId,
                   accentColor: controller.config.accentColor,
+                  autofocus: hasSelection
+                      ? tracks[i].id == selectedId
+                      : i == 0,
                   onTap: () {
                     controller.setAudioTrack(tracks[i]);
                     Navigator.of(ctx).pop();
@@ -89,6 +95,7 @@ Future<void> showSubtitleSheet(
           final accent = cfg.accentColor;
           final actions = cfg.subtitleActions;
 
+          final hasSelection = sources.contains(selected);
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -104,6 +111,8 @@ Future<void> showSubtitleSheet(
                             : Icons.closed_caption_rounded,
                     isSelected: sources[i] == selected,
                     accentColor: accent,
+                    autofocus:
+                        hasSelection ? sources[i] == selected : i == 0,
                     onTap: () {
                       controller.setSubtitle(sources[i]);
                       Navigator.of(ctx).pop();
@@ -119,6 +128,10 @@ Future<void> showSubtitleSheet(
                     icon: action.icon,
                     isSelected: false,
                     accentColor: accent,
+                    // With no tracks at all, the host actions are the only
+                    // thing a remote can land on.
+                    autofocus: !controller.hasSubtitles &&
+                        identical(action, actions.first),
                     onTap: () {
                       Navigator.of(ctx).pop();
                       action.onTap(context);
@@ -235,23 +248,37 @@ class _SpeedChipRow extends StatelessWidget {
       children: _kSpeedOptions.map((s) {
         final selected = (current - s).abs() < 0.01;
         final label = s == 1.0 ? '1×' : '$s×';
-        return GestureDetector(
-          onTap: () => onSelect(s),
-          child: AnimatedContainer(
+        return TvFocusable(
+          onPressed: () => onSelect(s),
+          // The current speed is where a remote should land.
+          autofocus: selected,
+          builder: (_, focused) => AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
             decoration: BoxDecoration(
-              color: selected ? accentColor.withAlpha(35) : Colors.white10,
+              color: focused
+                  ? accentColor.withAlpha(60)
+                  : selected
+                      ? accentColor.withAlpha(35)
+                      : Colors.white10,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: selected ? accentColor : Colors.transparent,
-                width: 1.5,
+                color: focused
+                    ? Colors.white
+                    : selected
+                        ? accentColor
+                        : Colors.transparent,
+                width: focused ? 2 : 1.5,
               ),
             ),
             child: Text(
               label,
               style: TextStyle(
-                color: selected ? accentColor : Colors.white70,
+                color: focused
+                    ? Colors.white
+                    : selected
+                        ? accentColor
+                        : Colors.white70,
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
@@ -274,26 +301,40 @@ class _TrackTile extends StatelessWidget {
   final Color accentColor;
   final VoidCallback onTap;
 
+  /// Takes focus when the sheet opens, so a remote lands on a real entry
+  /// instead of nowhere. Set on the selected row (or the first one).
+  final bool autofocus;
+
   const _TrackTile({
     required this.label,
     required this.icon,
     required this.isSelected,
     required this.accentColor,
     required this.onTap,
+    this.autofocus = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: AnimatedContainer(
+    return TvFocusable(
+      onPressed: onTap,
+      autofocus: autofocus,
+      builder: (_, focused) => AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         height: 52,
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: isSelected ? accentColor.withAlpha(25) : Colors.transparent,
+          color: focused
+              ? accentColor.withAlpha(60)
+              : isSelected
+                  ? accentColor.withAlpha(25)
+                  : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: focused ? Colors.white : Colors.transparent,
+            width: 2,
+          ),
         ),
         child: Row(
           children: [
@@ -304,7 +345,7 @@ class _TrackTile extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white70,
+                  color: isSelected || focused ? Colors.white : Colors.white70,
                   fontSize: 14,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 ),

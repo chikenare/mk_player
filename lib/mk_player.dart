@@ -12,6 +12,7 @@ export 'src/models/player_config.dart';
 export 'src/models/player_source.dart';
 export 'src/models/external_subtitle.dart' show ExternalSubtitle;
 export 'src/models/storyboard.dart' show Storyboard, StoryboardEntry;
+export 'src/models/tv_mode.dart' show TvMode;
 export 'src/models/video_fit.dart' show VideoFit;
 export 'src/models/video_format.dart' show PlayerVideoFormat;
 

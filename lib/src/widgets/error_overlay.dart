@@ -10,11 +10,16 @@ class PlayerErrorOverlay extends StatelessWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onBack;
 
+  /// Puts the initial focus on "Try Again" so a remote has somewhere to go —
+  /// the controls overlay (and its key handling) is gone while an error shows.
+  final bool autofocusRetry;
+
   const PlayerErrorOverlay({
     super.key,
     this.message,
     this.onRetry,
     this.onBack,
+    this.autofocusRetry = false,
   });
 
   @override
@@ -71,11 +76,16 @@ class PlayerErrorOverlay extends StatelessWidget {
                   if (onRetry != null)
                     TextButton.icon(
                       onPressed: onRetry,
+                      autofocus: autofocusRetry,
                       icon: const Icon(Icons.refresh_rounded, size: 18),
                       label: const Text('Try Again'),
                       style: TextButton.styleFrom(
                         foregroundColor: Colors.white,
                         backgroundColor: Colors.white12,
+                        // Visible from the sofa: the focused state is a filled
+                        // pill, not a tint nobody can see across a room.
+                        overlayColor: Colors.white,
+                        side: const BorderSide(color: Colors.white24),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 28,
                           vertical: 12,
