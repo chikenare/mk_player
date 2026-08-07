@@ -281,7 +281,7 @@ retries).
 _controller = CustomPlayerController(
   config: PlayerConfig(
     telemetry: TelemetryConfig(
-      apiBaseUrl: 'https://api.example.com',
+      apiUrl: 'https://api.example.com/api/telemetry',
       authToken: sanctumToken,
       appVersion: packageInfo.version,
       // Android TV reports as a different device class:

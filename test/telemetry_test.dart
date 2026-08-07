@@ -44,7 +44,7 @@ void main() {
     Future<int?> Function()? bytesLoadedProvider,
   }) =>
       TelemetryConfig(
-        apiBaseUrl: 'https://api.example.com/',
+        apiUrl: 'https://api.example.com/api/telemetry',
         appVersion: '3.4.1',
         authToken: 'token',
         progressInterval: progressInterval,

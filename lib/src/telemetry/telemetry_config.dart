@@ -32,13 +32,13 @@ enum TelemetryKind {
 /// cycle: `start` on the first frame, `progress` every 30 seconds of actual
 /// playback, `end` when the source stops or changes, and `error` on a fatal
 /// player failure. Events are written to a persistent on-disk queue the moment
-/// they happen and flushed in batches to `POST {apiBaseUrl}{endpointPath}`
-/// with `Authorization: Bearer {authToken}`.
+/// they happen and flushed in batches to `POST {apiUrl}` with
+/// `Authorization: Bearer {authToken}`.
 ///
 /// ```dart
 /// PlayerConfig(
 ///   telemetry: TelemetryConfig(
-///     apiBaseUrl: 'https://api.example.com',
+///     apiUrl: 'https://api.example.com/api/telemetry',
 ///     authToken: sanctumToken,
 ///     appVersion: '3.4.1',
 ///     deviceType: TelemetryDeviceType.android,
@@ -49,21 +49,21 @@ enum TelemetryKind {
 /// Telemetry is only emitted for sources that carry a
 /// [PlayerSource.contentId] — anything else is played without reporting.
 class TelemetryConfig {
-  /// Origin of the API, e.g. `https://api.example.com`. Trailing slashes are
-  /// ignored.
-  final String apiBaseUrl;
+  /// Full endpoint URL the batches are posted to, e.g.
+  /// `https://api.example.com/api/telemetry`.
+  final String apiUrl;
 
-  /// Path appended to [apiBaseUrl]. Defaults to `/api/telemetry`.
-  final String endpointPath;
-
-  /// Sanctum token sent as `Authorization: Bearer <token>`.
+  /// Token sent on every request as `Authorization: Bearer <token>`.
+  ///
+  /// A value that already starts with a scheme (`Bearer …`) is sent verbatim,
+  /// so a host that stores the whole header value works too.
   ///
   /// Ignored when [tokenProvider] is set. On 401 the queue is kept intact and
   /// flushed after the next successful login (see [updateToken]).
   final String? authToken;
 
-  /// Resolves the bearer token per request — use this instead of [authToken]
-  /// when the token can be refreshed while the player is alive.
+  /// Resolves the token per request — use this instead of [authToken] when it
+  /// can be refreshed while the player is alive. Same header, same rules.
   final FutureOr<String?> Function()? tokenProvider;
 
   /// Version string of the host app, e.g. `'3.4.1'`. Truncated to the 32
@@ -119,12 +119,11 @@ class TelemetryConfig {
   final bool verbose;
 
   const TelemetryConfig({
-    required this.apiBaseUrl,
+    required this.apiUrl,
     required this.appVersion,
     this.authToken,
     this.tokenProvider,
     this.deviceType = TelemetryDeviceType.android,
-    this.endpointPath = '/api/telemetry',
     this.kind = TelemetryKind.playback,
     this.progressInterval = const Duration(seconds: 30),
     this.flushInterval = const Duration(seconds: 60),
@@ -143,9 +142,8 @@ class TelemetryConfig {
   String get wireAppVersion =>
       appVersion.length <= 32 ? appVersion : appVersion.substring(0, 32);
 
-  /// Full endpoint URL.
-  Uri get endpoint =>
-      Uri.parse('${apiBaseUrl.replaceAll(RegExp(r'/+$'), '')}$endpointPath');
+  /// [apiUrl] parsed.
+  Uri get endpoint => Uri.parse(apiUrl);
 
   /// Resolves the bearer token for the next request.
   Future<String?> resolveToken() async {
@@ -160,8 +158,7 @@ class TelemetryConfig {
   TelemetryConfig updateToken(String? token) => copyWith(authToken: token);
 
   TelemetryConfig copyWith({
-    String? apiBaseUrl,
-    String? endpointPath,
+    String? apiUrl,
     String? authToken,
     FutureOr<String?> Function()? tokenProvider,
     String? appVersion,
@@ -178,8 +175,7 @@ class TelemetryConfig {
     bool? verbose,
   }) {
     return TelemetryConfig(
-      apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
-      endpointPath: endpointPath ?? this.endpointPath,
+      apiUrl: apiUrl ?? this.apiUrl,
       authToken: authToken ?? this.authToken,
       tokenProvider: tokenProvider ?? this.tokenProvider,
       appVersion: appVersion ?? this.appVersion,

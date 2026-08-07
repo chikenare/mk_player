@@ -86,7 +86,7 @@ class TelemetryClient {
           .postUrl(config.endpoint)
           .timeout(const Duration(seconds: 20));
       request.headers
-        ..set(HttpHeaders.authorizationHeader, 'Bearer $token')
+        ..set(HttpHeaders.authorizationHeader, _authorizationValue(token))
         ..set(HttpHeaders.contentTypeHeader, 'application/json')
         ..set(HttpHeaders.acceptHeader, 'application/json');
       request.write(payload);
@@ -144,6 +144,13 @@ class TelemetryClient {
       }
       return const TelemetryUploadResult(TelemetryUploadStatus.transient);
     }
+  }
+
+  /// The token always travels in `Authorization`. A value that already carries
+  /// its scheme is passed through untouched instead of being prefixed twice.
+  static String _authorizationValue(String token) {
+    final trimmed = token.trim();
+    return RegExp(r'^\S+\s').hasMatch(trimmed) ? trimmed : 'Bearer $trimmed';
   }
 
   /// `Retry-After` is either delay-seconds or an HTTP date.

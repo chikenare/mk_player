@@ -317,7 +317,7 @@ quality.
 final controller = CustomPlayerController(
   config: PlayerConfig(
     telemetry: TelemetryConfig(
-      apiBaseUrl: 'https://api.example.com',   // POST {base}/api/telemetry
+      apiUrl: 'https://api.example.com/api/telemetry',
       authToken: sanctumToken,                 // Authorization: Bearer …
       appVersion: '3.4.1',
       deviceType: TelemetryDeviceType.android, // .tv on Android TV
@@ -334,7 +334,7 @@ await controller.open(PlayerSource.network(
 
 ### What gets sent
 
-`POST {apiBaseUrl}/api/telemetry` with `Authorization: Bearer <token>` and
+`POST {apiUrl}` with `Authorization: Bearer <token>` and
 batches of 1–50 events, oldest first:
 
 ```jsonc
@@ -436,12 +436,11 @@ bandwidth metric stays empty.
 
 | Field | Default | Description |
 |---|---|---|
-| `apiBaseUrl` | — | API origin, e.g. `https://api.example.com` |
-| `authToken` | `null` | Bearer token sent with every request |
+| `apiUrl` | — | Full endpoint URL, e.g. `https://api.example.com/api/telemetry` |
+| `authToken` | `null` | Token sent as `Authorization: Bearer …` on every request |
 | `tokenProvider` | `null` | Resolves the token per request; wins over `authToken` |
 | `appVersion` | — | Reported as `appVersion` (truncated to 32 chars) |
 | `deviceType` | `.android` | `.web`, `.android`, `.tv` or `.other` |
-| `endpointPath` | `/api/telemetry` | Path appended to `apiBaseUrl` |
 | `kind` | `.playback` | `.playback` or `.download` |
 | `progressInterval` | `30s` | Spacing of `progress` events while playing |
 | `flushInterval` | `60s` | How often the queue is drained |

@@ -167,7 +167,7 @@ class PlayerConfig {
   /// Playback telemetry reporting against your API.
   ///
   /// When set, the player emits `start` / `progress` / `end` / `error` events
-  /// to `POST {apiBaseUrl}/api/telemetry` with a bearer token, queues them on
+  /// to `POST {apiUrl}` with a bearer token, queues them on
   /// disk and retries with backoff. `null` (default) disables reporting
   /// entirely — nothing is measured and no network call is made.
   ///
