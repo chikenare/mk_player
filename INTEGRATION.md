@@ -311,6 +311,41 @@ See the [Telemetry section of the README](README.md#telemetry) for the payload
 contract, the delivery rules and why `bytesDownloadedDelta` needs a native
 counter to be reported.
 
+### Reporting to your own API instead
+
+The player measures the session; where it is reported is a separate decision.
+`onPlaybackEvent` gives you every measured event so you can send it yourself,
+with no `TelemetryConfig` involved:
+
+```dart
+_controller = CustomPlayerController(
+  config: PlayerConfig(
+    onPlaybackEvent: (PlaybackEvent event) {
+      // event.type: start | progress | end | error
+      // event.sessionId, .contentId, .episodeId, .positionSeconds,
+      // .secondsWatchedDelta, .stallCountDelta, .stalledSecondsDelta,
+      // .startupMs, .resolution — every counter a delta since the last event.
+      myAnalytics.enqueue(event);
+    },
+  ),
+);
+```
+
+* Nothing is queued, persisted or posted anywhere: what you do with the event
+  is entirely yours. The on-disk queue and the retries only exist for the
+  built-in reporter.
+* Set both `telemetry` and `onPlaybackEvent` and one measurement feeds both —
+  each event arrives at each side **once, and identical** (same `sessionId`,
+  same deltas).
+* **A source without `contentId` produces no events**, callback included.
+* Keep the callback quick — it runs while the event is measured. An exception
+  thrown inside it is caught and logged; it never breaks playback nor the
+  built-in queue.
+
+`PlaybackEvent` carries no wire format of its own; the JSON payload of §11 is
+built by the telemetry layer. The old names `TelemetryEvent` /
+`TelemetryEventType` still work as aliases.
+
 ---
 
 ## 12. Configuration reference
@@ -332,3 +367,4 @@ counter to be reported.
 | `subtitlesConfiguration`        | `BetterPlayerSubtitlesConfiguration()` | Subtitle appearance: font size/colour/family, outline, background, paddings, alignment |
 | `aspectRatio`                   | `null`           | Force canvas ratio (null = stream's native ratio) |
 | `telemetry`                     | `null`           | `TelemetryConfig` for playback reporting (see §11) |
+| `onPlaybackEvent`               | `null`           | `void Function(PlaybackEvent)` — every measured playback event, to report it to your own API (see §11) |

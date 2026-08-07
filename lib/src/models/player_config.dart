@@ -3,9 +3,13 @@ import 'package:better_player_plus/better_player_plus.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show DeviceOrientation;
 
+import '../playback/playback_event.dart';
 import '../telemetry/telemetry_config.dart';
 import 'player_action.dart';
 import 'video_fit.dart';
+
+/// Signature of [PlayerConfig.onPlaybackEvent].
+typedef PlaybackEventCallback = void Function(PlaybackEvent event);
 
 /// Immutable configuration for [CustomPlayerController] and [PlayerView].
 ///
@@ -174,6 +178,30 @@ class PlayerConfig {
   /// Only sources carrying a [PlayerSource.contentId] are reported.
   final TelemetryConfig? telemetry;
 
+  /// Called with every playback event the player measures — `start`,
+  /// `progress`, `end` and `error` — so the host app can report them to its
+  /// own backend instead of (or alongside) the built-in [telemetry] reporter.
+  ///
+  /// ```dart
+  /// PlayerConfig(
+  ///   onPlaybackEvent: (event) => myAnalytics.record(event),
+  /// )
+  /// ```
+  ///
+  /// Setting it is enough to start measuring: [telemetry] is not required, and
+  /// nothing is queued or sent anywhere when it is absent. With both set, the
+  /// same measurement feeds both — each event reaches the callback and the
+  /// reporter exactly once, identical on both sides.
+  ///
+  /// The same rule applies as to [telemetry]: **a source without a
+  /// [PlayerSource.contentId] produces no events at all**, so the callback is
+  /// never invoked for it.
+  ///
+  /// It runs on the player's thread as the event is measured: keep it quick,
+  /// hand real work to your own queue. An exception thrown here is caught and
+  /// logged — it never breaks playback nor the built-in reporting.
+  final PlaybackEventCallback? onPlaybackEvent;
+
   // ── Host-app callbacks ────────────────────────────────────────────────────
 
   /// Called when playback reaches the end of the source.
@@ -214,6 +242,7 @@ class PlayerConfig {
     this.autoOrientation = false,
     this.fullscreenOrientations,
     this.telemetry,
+    this.onPlaybackEvent,
     this.onCompleted,
     this.onError,
     this.onPositionChanged,
@@ -248,6 +277,7 @@ class PlayerConfig {
     bool? autoOrientation,
     List<DeviceOrientation>? fullscreenOrientations,
     TelemetryConfig? telemetry,
+    PlaybackEventCallback? onPlaybackEvent,
     VoidCallback? onCompleted,
     void Function(String)? onError,
     void Function(Duration)? onPositionChanged,
@@ -286,6 +316,7 @@ class PlayerConfig {
       fullscreenOrientations:
           fullscreenOrientations ?? this.fullscreenOrientations,
       telemetry: telemetry ?? this.telemetry,
+      onPlaybackEvent: onPlaybackEvent ?? this.onPlaybackEvent,
       onCompleted: onCompleted ?? this.onCompleted,
       onError: onError ?? this.onError,
       onPositionChanged: onPositionChanged ?? this.onPositionChanged,

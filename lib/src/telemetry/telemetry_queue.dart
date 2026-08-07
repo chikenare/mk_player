@@ -5,7 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'telemetry_event.dart';
+import '../playback/playback_event.dart';
+import 'telemetry_serializer.dart';
 
 /// Persistent FIFO queue of telemetry events.
 ///
@@ -33,7 +34,7 @@ class TelemetryQueue {
 
   final bool verbose;
 
-  final List<TelemetryEvent> _events = [];
+  final List<PlaybackEvent> _events = [];
   File? _file;
   bool _loaded = false;
   bool _persistenceDisabled = false;
@@ -49,7 +50,7 @@ class TelemetryQueue {
       });
 
   /// Appends [event] and persists immediately.
-  Future<void> add(TelemetryEvent event) => _guard(() async {
+  Future<void> add(PlaybackEvent event) => _guard(() async {
         await _ensureLoaded();
         _events.add(event);
         if (_events.length > maxEvents) {
@@ -61,7 +62,7 @@ class TelemetryQueue {
       });
 
   /// Returns the oldest [count] events without removing them.
-  Future<List<TelemetryEvent>> peek(int count) => _guard(() async {
+  Future<List<PlaybackEvent>> peek(int count) => _guard(() async {
         await _ensureLoaded();
         return _events.take(count).toList(growable: false);
       });
@@ -106,7 +107,7 @@ class TelemetryQueue {
         if (line.trim().isEmpty) continue;
         final decoded = jsonDecode(line);
         if (decoded is! Map<String, dynamic>) continue;
-        final event = TelemetryEvent.fromJson(decoded);
+        final event = TelemetryEventSerializer.fromJson(decoded);
         if (event != null) _events.add(event);
       }
       _log('restored ${_events.length} event(s) from disk');
@@ -144,7 +145,7 @@ class TelemetryQueue {
     final file = await _resolveFile();
     if (file == null) return;
     final body =
-        _events.map((e) => jsonEncode(e.toJson())).join('\n');
+        _events.map((e) => jsonEncode(TelemetryEventSerializer.toJson(e))).join('\n');
     try {
       final temp = File('${file.path}.tmp');
       await temp.writeAsString(body.isEmpty ? '' : '$body\n', flush: true);

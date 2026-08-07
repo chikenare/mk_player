@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mk_player/src/playback/playback_event.dart';
+import 'package:mk_player/src/playback/playback_session_tracker.dart';
 import 'package:mk_player/src/telemetry/telemetry_client.dart';
 import 'package:mk_player/src/telemetry/telemetry_config.dart';
-import 'package:mk_player/src/telemetry/telemetry_event.dart';
 import 'package:mk_player/src/telemetry/telemetry_queue.dart';
 import 'package:mk_player/src/telemetry/telemetry_reporter.dart';
+import 'package:mk_player/src/telemetry/telemetry_serializer.dart';
 
 /// Captures the batches a reporter tries to deliver and lets a test decide how
 /// the API answers.
@@ -15,12 +17,12 @@ class _FakeClient extends TelemetryClient {
   )});
 
   TelemetryUploadResult result;
-  final List<List<TelemetryEvent>> batches = [];
+  final List<List<PlaybackEvent>> batches = [];
 
-  List<TelemetryEvent> get sent => [for (final b in batches) ...b];
+  List<PlaybackEvent> get sent => [for (final b in batches) ...b];
 
   @override
-  Future<TelemetryUploadResult> send(List<TelemetryEvent> events) async {
+  Future<TelemetryUploadResult> send(List<PlaybackEvent> events) async {
     batches.add(List.of(events));
     return result;
   }
@@ -55,32 +57,34 @@ void main() {
         queueFilePath: '${tempDir.path}/queue.jsonl',
       );
 
-  group('TelemetryEvent', () {
+  group('Telemetry wire format', () {
     test('occurredAt always carries an offset', () {
-      final local = TelemetryEvent(
-        type: TelemetryEventType.start,
+      final local = PlaybackEvent(
+        type: PlaybackEventType.start,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: DateTime(2026, 8, 6, 22, 30, 30),
         contentId: 812,
         positionSeconds: 0,
       );
-      final stamp = local.toJson()['occurredAt'] as String;
+      final stamp =
+          TelemetryEventSerializer.toJson(local)['occurredAt'] as String;
       expect(stamp, matches(r'(Z|[+-]\d{2}:\d{2})$'));
 
-      final utc = TelemetryEvent(
-        type: TelemetryEventType.start,
+      final utc = PlaybackEvent(
+        type: PlaybackEventType.start,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: DateTime.utc(2026, 8, 6, 22, 30, 30),
         contentId: 812,
         positionSeconds: 0,
       );
-      expect(utc.toJson()['occurredAt'], endsWith('Z'));
+      expect(TelemetryEventSerializer.toJson(utc)['occurredAt'],
+          endsWith('Z'));
     });
 
     test('never serialises a numeric field as null and clamps to the server '
         'ranges', () {
-      final json = TelemetryEvent(
-        type: TelemetryEventType.progress,
+      final event = PlaybackEvent(
+        type: PlaybackEventType.progress,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: _fixedTime,
         contentId: 812,
@@ -92,7 +96,8 @@ void main() {
         stalledSecondsDelta: 900,
         startupMs: 900000,
         resolution: '1080-with-a-very-long-label',
-      ).toJson();
+      );
+      final json = TelemetryEventSerializer.toJson(event);
 
       // An explicit null in a numeric field is a 422; an absent key is 0.
       expect(json.values.any((v) => v == null), isFalse);
@@ -107,34 +112,37 @@ void main() {
     });
 
     test('rejects queued events the API would refuse', () {
-      final valid = TelemetryEvent(
-        type: TelemetryEventType.progress,
+      final valid = TelemetryEventSerializer.toJson(PlaybackEvent(
+        type: PlaybackEventType.progress,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: _fixedTime,
         contentId: 812,
         positionSeconds: 10,
-      ).toJson();
+      ));
 
-      expect(TelemetryEvent.fromJson(valid), isNotNull);
-      expect(TelemetryEvent.fromJson({...valid}..remove('sessionId')), isNull);
-      expect(TelemetryEvent.fromJson({...valid, 'sessionId': 'short'}), isNull);
-      expect(TelemetryEvent.fromJson({...valid, 'contentId': 0}), isNull);
+      expect(TelemetryEventSerializer.fromJson(valid), isNotNull);
+      expect(TelemetryEventSerializer.fromJson({...valid}..remove('sessionId')),
+          isNull);
+      expect(TelemetryEventSerializer.fromJson({...valid, 'sessionId': 'short'}),
+          isNull);
+      expect(
+          TelemetryEventSerializer.fromJson({...valid, 'contentId': 0}), isNull);
     });
 
     test('omits bytesDownloadedDelta when it cannot be measured', () {
-      final json = TelemetryEvent(
-        type: TelemetryEventType.progress,
+      final json = TelemetryEventSerializer.toJson(PlaybackEvent(
+        type: PlaybackEventType.progress,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: _fixedTime,
         contentId: 812,
         positionSeconds: 10,
-      ).toJson();
+      ));
       expect(json.containsKey('bytesDownloadedDelta'), isFalse);
     });
 
     test('survives a JSON round-trip', () {
-      final event = TelemetryEvent(
-        type: TelemetryEventType.progress,
+      final event = PlaybackEvent(
+        type: PlaybackEventType.progress,
         sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
         occurredAt: DateTime.now(),
         contentId: 812,
@@ -146,8 +154,10 @@ void main() {
         stalledSecondsDelta: 4,
         resolution: '1080',
       );
-      final restored = TelemetryEvent.fromJson(event.toJson())!;
-      expect(restored.toJson(), event.toJson());
+      final restored =
+          TelemetryEventSerializer.fromJson(TelemetryEventSerializer.toJson(event))!;
+      expect(TelemetryEventSerializer.toJson(restored),
+          TelemetryEventSerializer.toJson(event));
     });
   });
 
@@ -157,8 +167,8 @@ void main() {
       final path = '${tempDir.path}/queue.jsonl';
       final queue = TelemetryQueue(maxEvents: 3, filePath: path);
       for (var i = 0; i < 5; i++) {
-        await queue.add(TelemetryEvent(
-          type: TelemetryEventType.progress,
+        await queue.add(PlaybackEvent(
+          type: PlaybackEventType.progress,
           sessionId: 'SESSION_${i}X',
           occurredAt: DateTime.now(),
           contentId: 1,
@@ -188,7 +198,7 @@ void main() {
       await reporter.close();
 
       final start = client.sent.first;
-      expect(start.type, TelemetryEventType.start);
+      expect(start.type, PlaybackEventType.start);
       expect(start.contentId, 812);
       expect(start.episodeId, 4711);
       expect(start.resolution, '1080');
@@ -219,7 +229,7 @@ void main() {
       await reporter.close();
 
       final end = client.sent.last;
-      expect(end.type, TelemetryEventType.end);
+      expect(end.type, PlaybackEventType.end);
       expect(end.secondsWatchedDelta, 14); // 10 + 4, the seek excluded
       expect(end.positionSeconds, 20 * 60 + 4);
     });
@@ -245,7 +255,7 @@ void main() {
 
       await reporter.close();
       final progress =
-          client.sent.where((e) => e.type == TelemetryEventType.progress);
+          client.sent.where((e) => e.type == PlaybackEventType.progress);
       expect(progress, isNotEmpty);
       expect(progress.first.secondsWatchedDelta, 5);
       // The counter was reset, so the following events carry no watched time.
@@ -377,10 +387,10 @@ void main() {
       expect(
         client.sent.map((e) => e.type).toList(),
         [
-          TelemetryEventType.start,
-          TelemetryEventType.end,
-          TelemetryEventType.start,
-          TelemetryEventType.end,
+          PlaybackEventType.start,
+          PlaybackEventType.end,
+          PlaybackEventType.start,
+          PlaybackEventType.end,
         ],
       );
     });
@@ -448,6 +458,162 @@ void main() {
       expect(client.batches.every((b) => b.length <= 50), isTrue);
       expect(await reporter.queuedEventCount, 0);
       await reporter.close();
+    });
+  });
+
+  group('Playback event sinks', () {
+    /// Wires a tracker the way [CustomPlayerController] does: one tracker, the
+    /// host callback as a sink, the reporter attached to that same tracker.
+    ({
+      PlaybackSessionTracker tracker,
+      TelemetryReporter reporter,
+      _FakeClient client,
+      List<PlaybackEvent> seen,
+    }) wireBoth({
+      TelemetryConfig? config,
+      TelemetryUploadResult result =
+          const TelemetryUploadResult(TelemetryUploadStatus.accepted),
+      PlaybackEventSink? extraSink,
+    }) {
+      final effective = config ?? configFor(progressInterval: const Duration(days: 1));
+      final client = _FakeClient(effective, result: result);
+      final seen = <PlaybackEvent>[];
+      final tracker =
+          PlaybackSessionTracker(options: effective.playbackOptions);
+      if (extraSink != null) tracker.addSink(extraSink);
+      tracker.addSink(seen.add);
+      final reporter =
+          TelemetryReporter.forTracker(effective, tracker, client: client);
+      return (tracker: tracker, reporter: reporter, client: client, seen: seen);
+    }
+
+    test('the callback measures a session with no TelemetryConfig at all',
+        () async {
+      final seen = <PlaybackEvent>[];
+      final tracker = PlaybackSessionTracker(
+        options: const PlaybackSessionOptions(
+          progressInterval: Duration(milliseconds: 40),
+        ),
+        sinks: [seen.add],
+      );
+
+      tracker.beginSession(contentId: 812, episodeId: 4711);
+      tracker.onResolution(1080);
+      tracker.onPlaying(Duration.zero);
+      for (var second = 1; second <= 3; second++) {
+        tracker.onPosition(Duration(seconds: second), playing: true);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      tracker.dispose();
+      await tracker.settled;
+
+      expect(seen.first.type, PlaybackEventType.start);
+      expect(seen.first.startupMs, isNotNull);
+      expect(seen.first.resolution, '1080');
+      expect(seen.last.type, PlaybackEventType.end);
+      expect(seen.where((e) => e.type == PlaybackEventType.progress), isNotEmpty);
+      expect(seen.map((e) => e.episodeId).toSet(), {4711});
+      expect(seen.fold<int>(0, (sum, e) => sum + e.secondsWatchedDelta), 3);
+      // Measurement only: nothing was queued, nothing was sent.
+      expect(seen.map((e) => e.sessionId).toSet().length, 1);
+    });
+
+    test('both sinks get the same event exactly once', () async {
+      final w = wireBoth();
+
+      w.tracker.beginSession(contentId: 812);
+      w.tracker.onPlaying(Duration.zero);
+      w.tracker.onPosition(const Duration(seconds: 1), playing: true);
+      w.tracker.endSession();
+      await w.reporter.close();
+      w.tracker.dispose();
+
+      expect(w.seen.map((e) => e.type).toList(),
+          [PlaybackEventType.start, PlaybackEventType.end]);
+      expect(w.client.sent.length, w.seen.length);
+      for (var i = 0; i < w.seen.length; i++) {
+        // The very same instance on both sides — measured once, reported twice.
+        expect(identical(w.client.sent[i], w.seen[i]), isTrue);
+      }
+    });
+
+    test('one start per media load when telemetry and callback run together',
+        () async {
+      final w = wireBoth();
+      expect(identical(w.reporter.tracker, w.tracker), isTrue,
+          reason: 'the reporter must not build a tracker of its own');
+
+      w.tracker.beginSession(contentId: 812);
+      w.tracker.onPlaying(Duration.zero);
+      w.tracker.beginSession(contentId: 812); // played again
+      w.tracker.onPlaying(Duration.zero);
+      await w.reporter.close();
+      w.tracker.dispose();
+
+      final starts =
+          w.seen.where((e) => e.type == PlaybackEventType.start).toList();
+      expect(starts.length, 2, reason: 'one start per load, never a duplicate');
+      expect(starts.map((e) => e.sessionId).toSet().length, 2);
+      expect(w.client.sent.where((e) => e.type == PlaybackEventType.start).length,
+          2);
+      expect(w.client.sent.length, w.seen.length);
+    });
+
+    test('an exception from the callback leaves the queue untouched', () async {
+      final w = wireBoth(
+        result: const TelemetryUploadResult(TelemetryUploadStatus.unauthorized),
+        extraSink: (_) => throw StateError('host app blew up'),
+      );
+
+      w.tracker.beginSession(contentId: 812);
+      w.tracker.onPlaying(Duration.zero);
+      w.tracker.endSession();
+      await w.reporter.flush(ignoreBackoff: true);
+
+      // The throwing sink runs first, and neither the sink after it nor the
+      // queue behind it notices.
+      expect(w.seen.map((e) => e.type).toList(),
+          [PlaybackEventType.start, PlaybackEventType.end]);
+      expect(await w.reporter.queuedEventCount, 2);
+      expect(w.tracker.sessionActive, isFalse);
+
+      await w.reporter.close();
+      w.tracker.dispose();
+    });
+
+    test('a source without contentId produces no events on either side',
+        () async {
+      final w = wireBoth(
+          config: configFor(progressInterval: const Duration(milliseconds: 30)));
+
+      // No session is ever opened for it — the player still reports position,
+      // buffering and resolution while it plays.
+      w.tracker.onPlaying(Duration.zero);
+      w.tracker.onPosition(const Duration(seconds: 1), playing: true);
+      w.tracker.onBufferingStart();
+      w.tracker.onBufferingEnd();
+      w.tracker.onResolution(1080);
+      w.tracker.endSession();
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      await w.reporter.close();
+      w.tracker.dispose();
+
+      expect(w.seen, isEmpty);
+      expect(w.client.sent, isEmpty);
+      expect(await w.reporter.queuedEventCount, 0);
+    });
+
+    test('the former TelemetryEvent names still resolve', () {
+      const TelemetryEventType type = PlaybackEventType.start;
+      final TelemetryEvent event = PlaybackEvent(
+        type: type,
+        sessionId: '01J4X8Y3NDQ2M9V7B1KQZT5W6E',
+        occurredAt: _fixedTime,
+        contentId: 812,
+        positionSeconds: 0,
+      );
+      expect(event, isA<PlaybackEvent>());
+      expect(TelemetryEventSerializer.toJson(event)['type'], 'start');
     });
   });
 }

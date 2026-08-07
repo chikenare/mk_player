@@ -303,6 +303,7 @@ CustomPlayerController(
 | `onCompleted` | `null` | Callback when playback finishes |
 | `onError` | `null` | Callback with error message string |
 | `telemetry` | `null` | Playback telemetry reporting — see [Telemetry](#telemetry) |
+| `onPlaybackEvent` | `null` | Receives every measured playback event, to report it wherever you want — see [Reporting to your own backend](#reporting-to-your-own-backend) |
 | `onPositionChanged` | `null` | Throttled (~1/sec) position callback — ideal for resume tracking |
 
 ---
@@ -389,6 +390,44 @@ a silent one would read as "reporting fine, no data".
 a `start`, so the server has no open session to close, and its error rate is
 computed over sessions it has seen. It is logged locally and your crash reporting
 still sees it.
+
+### Reporting to your own backend
+
+Measuring the session and reporting it are two different jobs, and only the
+first one needs to live in the player. `onPlaybackEvent` hands you every event
+the player measures — the same ones the built-in reporter would send — so you
+can file them wherever you want:
+
+```dart
+CustomPlayerController(
+  config: PlayerConfig(
+    onPlaybackEvent: (PlaybackEvent event) {
+      myAnalytics.record(event);   // your API, your payload, your queue
+    },
+  ),
+);
+```
+
+Setting it is enough to start measuring: `TelemetryConfig` is **not** required,
+and without it nothing is queued or sent anywhere. With both set, one
+measurement feeds both destinations — each event reaches your callback and the
+built-in reporter **exactly once, and identical**, with the same `sessionId`,
+the same deltas and the same `occurredAt`.
+
+The same rule applies as to the built-in reporter: **a source without a
+`contentId` produces no events at all**, so the callback is never invoked for
+it. Everything the player measures hangs off that id.
+
+The callback runs on the player's thread as the event is measured: keep it
+quick and hand real work to your own queue. An exception thrown inside it is
+caught and logged — it never breaks playback, and never disturbs the built-in
+queue.
+
+`PlaybackEvent` is a plain measurement record with no wire format of its own:
+the API payload above (its field names, its caps, its timestamp format) is
+produced by the telemetry layer, not by the event. `TelemetryEvent` and
+`TelemetryEventType` remain valid as aliases of `PlaybackEvent` /
+`PlaybackEventType`.
 
 ### Delivery
 
@@ -1031,12 +1070,15 @@ lib/
     │   ├── player_config.dart      ← PlayerConfig
     │   ├── player_source.dart      ← PlayerSource
     │   └── storyboard.dart         ← Storyboard + VTT parser
-    ├── telemetry/
-    │   ├── telemetry_config.dart   ← TelemetryConfig
-    │   ├── telemetry_event.dart    ← TelemetryEvent + payload serialisation
-    │   ├── telemetry_queue.dart    ← persistent on-disk queue
-    │   ├── telemetry_client.dart   ← POST /api/telemetry
-    │   └── telemetry_reporter.dart ← session measurement + delivery
+    ├── playback/                    ← measurement, no IO
+    │   ├── playback_event.dart      ← PlaybackEvent (aka TelemetryEvent)
+    │   └── playback_session_tracker.dart ← measures the session, feeds sinks
+    ├── telemetry/                   ← transport to the built-in API
+    │   ├── telemetry_config.dart    ← TelemetryConfig
+    │   ├── telemetry_serializer.dart ← payload format, clamps, session id rules
+    │   ├── telemetry_queue.dart     ← persistent on-disk queue
+    │   ├── telemetry_client.dart    ← POST /api/telemetry
+    │   └── telemetry_reporter.dart  ← queue + delivery (a sink of the tracker)
     └── widgets/
         ├── controls_overlay.dart   ← auto-hiding controls
         ├── progress_bar.dart       ← scrubber + thumbnail popup

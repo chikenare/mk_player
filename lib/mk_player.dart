@@ -15,11 +15,18 @@ export 'src/models/storyboard.dart' show Storyboard, StoryboardEntry;
 export 'src/models/video_fit.dart' show VideoFit;
 export 'src/models/video_format.dart' show PlayerVideoFormat;
 
-// ── Telemetry ─────────────────────────────────────────────────────────────────
+// ── Playback measurement ──────────────────────────────────────────────────────
+// What the player measures, independent of where it is reported. `PlayerConfig
+// .onPlaybackEvent` receives these; `TelemetryEvent`/`TelemetryEventType` are
+// the former names, kept as aliases.
+export 'src/playback/playback_event.dart'
+    show PlaybackEvent, PlaybackEventType, TelemetryEvent, TelemetryEventType;
+export 'src/playback/playback_session_tracker.dart'
+    show PlaybackEventSink, PlaybackSessionOptions, PlaybackSessionTracker;
+
+// ── Telemetry reporting (the built-in API transport) ──────────────────────────
 export 'src/telemetry/telemetry_config.dart'
     show TelemetryConfig, TelemetryDeviceType, TelemetryKind;
-export 'src/telemetry/telemetry_event.dart'
-    show TelemetryEvent, TelemetryEventType;
 export 'src/telemetry/telemetry_reporter.dart' show TelemetryReporter;
 
 // ── Core controller ───────────────────────────────────────────────────────────

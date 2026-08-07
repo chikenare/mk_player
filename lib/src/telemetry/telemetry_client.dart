@@ -4,8 +4,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../playback/playback_event.dart';
 import 'telemetry_config.dart';
-import 'telemetry_event.dart';
+import 'telemetry_serializer.dart';
 
 /// Outcome of a single `POST /api/telemetry` request.
 enum TelemetryUploadStatus {
@@ -64,7 +65,7 @@ class TelemetryClient {
   Future<String?> _token() async =>
       _hasTokenOverride ? _tokenOverride : await config.resolveToken();
 
-  Future<TelemetryUploadResult> send(List<TelemetryEvent> events) async {
+  Future<TelemetryUploadResult> send(List<PlaybackEvent> events) async {
     if (_closed || events.isEmpty) {
       return const TelemetryUploadResult(TelemetryUploadStatus.accepted);
     }
@@ -78,7 +79,7 @@ class TelemetryClient {
       'deviceType': config.deviceType.wireName,
       'kind': config.kind.wireName,
       'appVersion': config.wireAppVersion,
-      'events': [for (final e in events) e.toJson()],
+      'events': [for (final e in events) TelemetryEventSerializer.toJson(e)],
     });
 
     try {

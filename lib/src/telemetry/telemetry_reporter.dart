@@ -1,31 +1,26 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 
+import '../playback/playback_event.dart';
+import '../playback/playback_session_tracker.dart';
 import 'telemetry_client.dart';
 import 'telemetry_config.dart';
-import 'telemetry_event.dart';
 import 'telemetry_queue.dart';
 
-/// Turns player events into API telemetry: measures one playback session,
-/// emits `start` / `progress` / `end` / `error`, persists every event and
-/// drains the queue against the API.
+/// Delivers measured playback events to the telemetry API: it is a sink of a
+/// [PlaybackSessionTracker] that persists every event and drains the queue
+/// against the endpoint.
 ///
-/// The reporter owns the rules the backend depends on:
-///
-/// * every counter is a **delta since the previous event** and is reset to zero
-///   once the event is queued — a lost report costs one interval, nothing more;
-/// * `occurredAt` always carries a UTC offset, so a queue flushed the next day
-///   is still filed under the day it was watched;
-/// * a fresh `sessionId` per media load — repeats of the same title included —
-///   repeated on every event of that playback;
-/// * `progress` only ticks while the video is actually playing in the
-///   foreground — never while paused or backgrounded.
+/// The measurement rules (session ids, deltas, seeks, stalls, the `progress`
+/// cadence) belong to the tracker; what lives here is transport: the on-disk
+/// queue, the batching, the token, the retries and their backoff.
 ///
 /// Created by [CustomPlayerController] when [PlayerConfig.telemetry] is set;
 /// host apps do not normally build one themselves.
 class TelemetryReporter with WidgetsBindingObserver {
+  /// Standalone reporter: it builds and owns its own tracker, and the
+  /// measurement hooks below drive it.
   TelemetryReporter(
     this.config, {
     TelemetryQueue? queue,
@@ -36,7 +31,38 @@ class TelemetryReporter with WidgetsBindingObserver {
               filePath: config.queueFilePath,
               verbose: config.verbose,
             ),
-        _client = client ?? TelemetryClient(config) {
+        _client = client ?? TelemetryClient(config),
+        _tracker = PlaybackSessionTracker(options: config.playbackOptions),
+        _ownsTracker = true {
+    _start();
+  }
+
+  /// Attaches to a [tracker] the caller already owns — what
+  /// [CustomPlayerController] does, so that one playback is measured once and
+  /// every sink (this reporter, [PlayerConfig.onPlaybackEvent]) sees the same
+  /// events.
+  ///
+  /// The tracker is neither started nor disposed here: it outlives the
+  /// reporter and its owner closes it.
+  TelemetryReporter.forTracker(
+    this.config,
+    PlaybackSessionTracker tracker, {
+    TelemetryQueue? queue,
+    TelemetryClient? client,
+  })  : _queue = queue ??
+            TelemetryQueue(
+              maxEvents: config.maxQueuedEvents,
+              filePath: config.queueFilePath,
+              verbose: config.verbose,
+            ),
+        _client = client ?? TelemetryClient(config),
+        _tracker = tracker,
+        _ownsTracker = false {
+    _start();
+  }
+
+  void _start() {
+    _tracker.addSink(_onEvent);
     _observeLifecycle();
     _flushTimer = Timer.periodic(config.flushInterval, (_) => flush());
     // Drain whatever a previous run left behind (process death, offline TV).
@@ -46,36 +72,15 @@ class TelemetryReporter with WidgetsBindingObserver {
   final TelemetryConfig config;
   final TelemetryQueue _queue;
   final TelemetryClient _client;
+  final PlaybackSessionTracker _tracker;
 
-  /// Position jumps larger than this are treated as seeks and never counted as
-  /// watched time (positions arrive roughly every 300ms while playing).
-  static const _seekThreshold = Duration(seconds: 5);
+  /// Whether [close] must dispose the tracker — only true when this reporter
+  /// created it.
+  final bool _ownsTracker;
 
-  // ── Session state ─────────────────────────────────────────────────────────
+  /// The layer that measures the session this reporter reports on.
+  PlaybackSessionTracker get tracker => _tracker;
 
-  String? _sessionId;
-  int? _contentId;
-  int? _episodeId;
-  bool _startSent = false;
-  bool _sessionActive = false;
-
-  final Stopwatch _startup = Stopwatch();
-
-  // Pending deltas — reset to zero after every emitted event.
-  int _watchedMs = 0;
-  int _stallCount = 0;
-  int _stalledMs = 0;
-  int? _bytesBaseline;
-  bool _bytesBaselineReady = false;
-
-  Duration _position = Duration.zero;
-  Duration? _lastWatchPosition;
-  DateTime? _stallStartedAt;
-  String? _resolution;
-  bool _playing = false;
-  bool _foreground = true;
-
-  Timer? _progressTimer;
   Timer? _flushTimer;
 
   /// Set once [close] has finished; nothing is measured or sent afterwards.
@@ -85,8 +90,9 @@ class TelemetryReporter with WidgetsBindingObserver {
   /// the queue is still allowed to run.
   bool _closing = false;
 
-  // Keeps emitted events in chronological order despite async byte reads.
-  Future<void> _emitLock = Future.value();
+  // Serialises writes to the queue, so events reach disk in the order the
+  // tracker emitted them.
+  Future<void> _queueChain = Future.value();
 
   // ── Flush state ───────────────────────────────────────────────────────────
 
@@ -97,300 +103,72 @@ class TelemetryReporter with WidgetsBindingObserver {
   Future<void> _flushChain = Future.value();
 
   /// Whether a playback session is currently being measured.
-  bool get sessionActive => _sessionActive;
+  bool get sessionActive => _tracker.sessionActive;
 
   /// Id of the session being measured, for diagnostics. Null between sessions.
-  String? get sessionId => _sessionId;
+  String? get sessionId => _tracker.sessionId;
 
   /// Events waiting to be delivered.
   Future<int> get queuedEventCount => _queue.length;
 
-  // ── Session lifecycle ─────────────────────────────────────────────────────
+  // ── Measurement hooks ─────────────────────────────────────────────────────
+  //
+  // Kept as the reporter's own API for hosts that drive it directly; each one
+  // forwards to the tracker, which is what actually measures.
 
   /// Starts measuring a new playback session — one per media load, repeats of
   /// the same media included.
   void beginSession({required int contentId, int? episodeId}) {
     if (_disposed || _closing) return;
-    if (contentId < 1) {
-      // The API requires contentId >= 1; reporting it would 422 the whole batch.
-      debugPrint('[MkPlayer] telemetry: ignoring session with contentId '
-          '$contentId (must be >= 1)');
-      return;
-    }
-    // Changing content closes the previous session with its pending deltas.
-    if (_sessionActive) endSession();
-
-    _sessionId = _generateSessionId();
-    _contentId = contentId;
-    _episodeId = episodeId;
-    _sessionActive = true;
-    _startSent = false;
-
-    _watchedMs = 0;
-    _stallCount = 0;
-    _stalledMs = 0;
-    _bytesBaseline = null;
-    _bytesBaselineReady = false;
-    _position = Duration.zero;
-    _lastWatchPosition = null;
-    _stallStartedAt = null;
-    _resolution = null;
-    _playing = false;
-
-    _progressTimer?.cancel();
-    _progressTimer = null;
-
-    // prepare() → first frame.
-    _startup
-      ..reset()
-      ..start();
-
-    // The byte counter is cumulative for the whole player, so the session's
-    // baseline is whatever it reads right now.
-    unawaited(_readBytesTotal().then((total) {
-      if (_bytesBaselineReady) return;
-      _bytesBaseline = total;
-      _bytesBaselineReady = true;
-    }));
-
-    _log('session $_sessionId started '
-        '(content $contentId, episode $episodeId)');
+    _tracker.beginSession(contentId: contentId, episodeId: episodeId);
   }
 
-  /// Ends the current session, flushing the deltas that are still pending.
+  /// Ends the current session, queueing the deltas that are still pending.
   void endSession() {
-    if (!_sessionActive) return;
-    final wasStarted = _startSent;
-    // A session that ends mid-rebuffer still owes that freeze time.
-    _stopStallTimer();
-    _sessionActive = false;
-    _playing = false;
-    _progressTimer?.cancel();
-    _progressTimer = null;
-    _startup.stop();
-    // A session that never reached its first frame produced no `start`; there
-    // is nothing to close on the server side.
-    if (wasStarted) _emit(TelemetryEventType.end);
-    _sessionId = null;
+    _tracker.endSession();
     unawaited(flush());
   }
 
-  /// A fatal player error: closes the session with the pending deltas. The
-  /// error detail deliberately never leaves for this API — that belongs in
-  /// crash reporting.
+  /// A fatal player error: closes the session with the pending deltas.
   void reportError() {
-    if (!_sessionActive) return;
-    _stopStallTimer();
-    _sessionActive = false;
-    _playing = false;
-    _progressTimer?.cancel();
-    _progressTimer = null;
-    _startup.stop();
-    // Deliberate: a failure before the first frame is NOT reported. The server
-    // derives its error rate from sessions it has seen open, and this session
-    // never sent a `start` — an `error` alone would be an event for a session
-    // that does not exist there. It is the most interesting failure, so it is
-    // logged here and belongs in crash reporting, which sees it either way.
-    if (_startSent) {
-      _emit(TelemetryEventType.error);
-    } else {
-      _log('fatal error before the first frame — session $_sessionId never '
-          'opened server-side, not reported');
-    }
-    _sessionId = null;
+    _tracker.reportError();
     unawaited(flush());
   }
-
-  // ── Player signals ────────────────────────────────────────────────────────
 
   /// The player reached its first frame / resumed playing.
-  void onPlaying(Duration position) {
-    if (!_sessionActive) return;
-    _position = position;
-    _lastWatchPosition ??= position;
-    _playing = true;
-    if (!_startSent) {
-      _startup.stop();
-      _startSent = true;
-      _emit(TelemetryEventType.start, startupMs: _startup.elapsedMilliseconds);
-      _progressTimer ??=
-          Timer.periodic(config.progressInterval, (_) => _onProgressTick());
-    }
-  }
+  void onPlaying(Duration position) => _tracker.onPlaying(position);
 
-  void onPaused(Duration position) {
-    if (!_sessionActive) return;
-    _position = position;
-    _lastWatchPosition = position;
-    _playing = false;
-    // A pause during a rebuffer still closes the stall — the freeze is over.
-    _stopStallTimer();
-  }
+  void onPaused(Duration position) => _tracker.onPaused(position);
 
   /// Position update from the player (~every 300ms while playing).
-  void onPosition(Duration position, {required bool playing}) {
-    if (!_sessionActive) return;
-    _position = position;
-    if (!playing) {
-      _lastWatchPosition = position;
-      _playing = false;
-      return;
-    }
-    _playing = true;
-    final previous = _lastWatchPosition;
-    _lastWatchPosition = position;
-    if (previous == null) return;
-    final advance = position - previous;
-    // Backwards or a big jump forward is a seek: skip it, keep counting after.
-    if (advance <= Duration.zero || advance > _seekThreshold) return;
-    _watchedMs += advance.inMilliseconds;
-  }
+  void onPosition(Duration position, {required bool playing}) =>
+      _tracker.onPosition(position, playing: playing);
 
-  /// Buffering began. Only counts as a stall once playback has started —
-  /// buffering before the first frame is startup time.
-  ///
-  /// This is the only place the rebuffer counter moves: a freeze spanning
-  /// several `progress` events is one stall, however long it lasts.
-  void onBufferingStart() {
-    if (!_sessionActive || !_startSent) return;
-    if (_stallStartedAt != null) return; // already inside this stall
-    _stallStartedAt = DateTime.now();
-    _stallCount++;
-  }
+  /// Buffering began.
+  void onBufferingStart() => _tracker.onBufferingStart();
 
   /// Buffering ended.
-  void onBufferingEnd() => _stopStallTimer();
+  void onBufferingEnd() => _tracker.onBufferingEnd();
 
   /// Height of the quality currently being rendered, e.g. 1080.
-  void onResolution(int? height) {
-    if (height == null || height <= 0) return;
-    _resolution = '$height';
-  }
+  void onResolution(int? height) => _tracker.onResolution(height);
 
-  /// Closes an in-flight stall, banking the time it lasted. The count was
-  /// already taken when the stall began.
-  void _stopStallTimer() {
-    final startedAt = _stallStartedAt;
-    _stallStartedAt = null;
-    if (startedAt == null) return;
-    _stalledMs += DateTime.now().difference(startedAt).inMilliseconds;
-  }
+  // ── Sink ──────────────────────────────────────────────────────────────────
 
-  void _onProgressTick() {
-    if (!_sessionActive || !_startSent) return;
-    // Nothing while paused or in the background, per the API contract.
-    if (!_playing || !_foreground) return;
-    _emit(TelemetryEventType.progress);
-  }
-
-  // ── Emission ──────────────────────────────────────────────────────────────
-
-  /// Snapshots the pending deltas into an event, resets them to zero and
-  /// queues it. Everything after the snapshot belongs to the next interval.
-  void _emit(TelemetryEventType type, {int? startupMs}) {
-    final sessionId = _sessionId;
-    final contentId = _contentId;
-    if (sessionId == null || contentId == null) return;
-
-    final occurredAt = DateTime.now();
-    final episodeId = _episodeId;
-    final resolution = _resolution;
-    final positionSeconds = _position.inSeconds;
-
-    // `start` reports startup time with every delta at zero. Nothing is
-    // consumed here on purpose: the bytes and buffering that happened while
-    // opening the stream stay pending and are billed to the first `progress`,
-    // so no traffic is silently dropped.
-    if (type == TelemetryEventType.start) {
-      _queueEvent(TelemetryEvent(
-        type: type,
-        sessionId: sessionId,
-        occurredAt: occurredAt,
-        contentId: contentId,
-        episodeId: episodeId,
-        positionSeconds: positionSeconds,
-        secondsWatchedDelta: 0,
-        bytesDownloadedDelta: config.bytesLoadedProvider == null ? null : 0,
-        stallCountDelta: 0,
-        stalledSecondsDelta: 0,
-        startupMs: startupMs,
-        resolution: resolution,
-      ));
-      return;
-    }
-
-    // An in-flight stall contributes the time elapsed so far; the remainder
-    // lands in the next event. Its count was already taken at
-    // onBufferingStart, so a long freeze spanning several events stays one
-    // stall instead of being counted once per interval.
-    final stallStartedAt = _stallStartedAt;
-    final stallCount = _stallCount;
-    var stalledMs = _stalledMs;
-    if (stallStartedAt != null) {
-      stalledMs += occurredAt.difference(stallStartedAt).inMilliseconds;
-      _stallStartedAt = occurredAt;
-    }
-
-    final watchedSeconds = (_watchedMs ~/ 1000).clamp(0, 300);
-    final stalledSeconds = (stalledMs ~/ 1000).clamp(0, 300);
-
-    // Keep the sub-second remainders so 30s ticks don't systematically shave
-    // a fraction of a second off every interval.
-    _watchedMs -= watchedSeconds * 1000;
-    _stalledMs = stalledMs - stalledSeconds * 1000;
-    _stallCount = 0;
-
-    _emitLock = _emitLock.then((_) async {
-      final event = TelemetryEvent(
-        type: type,
-        sessionId: sessionId,
-        occurredAt: occurredAt,
-        contentId: contentId,
-        episodeId: episodeId,
-        positionSeconds: positionSeconds,
-        secondsWatchedDelta: watchedSeconds,
-        bytesDownloadedDelta: await _consumeBytesDelta(),
-        stallCountDelta: stallCount,
-        stalledSecondsDelta: stalledSeconds,
-        startupMs: startupMs,
-        resolution: resolution,
-      );
+  /// Persists one measured event and, when it closes a session, delivers what
+  /// is queued right away — including sessions the tracker ended on its own
+  /// (a new media load, the app being detached).
+  void _onEvent(PlaybackEvent event) {
+    if (_disposed) return;
+    _queueChain = _queueChain.then((_) async {
       await _queue.add(event);
       _log('queued $event');
+    }).catchError((Object e) {
+      debugPrint('[MkPlayer] telemetry could not queue an event: $e');
     });
-  }
-
-  /// Persists an event that needs no delta bookkeeping, keeping it in order
-  /// behind anything already being emitted.
-  void _queueEvent(TelemetryEvent event) {
-    _emitLock = _emitLock.then((_) async {
-      await _queue.add(event);
-      _log('queued $event');
-    });
-  }
-
-  /// Difference of the host-supplied cumulative byte counter since the last
-  /// event. Null when no counter is wired — bytes are never estimated.
-  Future<int?> _consumeBytesDelta() async {
-    if (config.bytesLoadedProvider == null) return null;
-    final total = await _readBytesTotal();
-    if (total == null) return null;
-    final baseline = _bytesBaselineReady ? (_bytesBaseline ?? 0) : total;
-    _bytesBaseline = total;
-    _bytesBaselineReady = true;
-    final delta = total - baseline;
-    // A counter that resets (new player instance) must not report negatives.
-    return delta < 0 ? 0 : delta;
-  }
-
-  Future<int?> _readBytesTotal() async {
-    final provider = config.bytesLoadedProvider;
-    if (provider == null) return null;
-    try {
-      return await provider();
-    } catch (e) {
-      debugPrint('[MkPlayer] telemetry bytesLoadedProvider failed: $e');
-      return null;
+    if (event.type == PlaybackEventType.end ||
+        event.type == PlaybackEventType.error) {
+      unawaited(flush());
     }
   }
 
@@ -421,8 +199,9 @@ class TelemetryReporter with WidgetsBindingObserver {
         DateTime.now().isBefore(notBefore)) {
       return;
     }
-    // Let any event emitted a moment ago reach the queue first.
-    await _emitLock;
+    // Let any event emitted a moment ago be measured and reach the queue first.
+    await _tracker.settled;
+    await _queueChain;
     while (!_disposed) {
       final batch = await _queue.peek(config.maxBatchSize);
       if (batch.isEmpty) {
@@ -482,25 +261,16 @@ class TelemetryReporter with WidgetsBindingObserver {
     try {
       WidgetsBinding.instance.addObserver(this);
     } catch (_) {
-      // No binding (pure Dart tests): foreground stays true.
+      // No binding (pure Dart tests): nothing to react to.
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.resumed:
-        _foreground = true;
-        unawaited(flush());
-      case AppLifecycleState.inactive:
-      case AppLifecycleState.hidden:
-      case AppLifecycleState.paused:
-        _foreground = false;
-      case AppLifecycleState.detached:
-        // The app is going away: close the session and try one last delivery.
-        _foreground = false;
-        endSession();
-    }
+    // Back to the foreground: a good moment to retry what went offline. Going
+    // away is the tracker's business — it closes the session, and the `end`
+    // event that reaches this sink triggers the final flush.
+    if (state == AppLifecycleState.resumed) unawaited(flush());
   }
 
   // ── Disposal ──────────────────────────────────────────────────────────────
@@ -509,13 +279,22 @@ class TelemetryReporter with WidgetsBindingObserver {
   Future<void> close() async {
     if (_disposed || _closing) return;
     _closing = true;
-    endSession();
-    _progressTimer?.cancel();
+    // A tracker this reporter owns is closed with it; a shared one only gets
+    // its session ended — its owner disposes it.
+    if (_ownsTracker) {
+      _tracker.dispose();
+    } else {
+      _tracker.endSession();
+    }
     _flushTimer?.cancel();
     try {
       WidgetsBinding.instance.removeObserver(this);
     } catch (_) {}
-    await _emitLock;
+    // The final `end` is dispatched asynchronously: wait for it to reach the
+    // queue before detaching, or it would never be delivered.
+    await _tracker.settled;
+    _tracker.removeSink(_onEvent);
+    await _queueChain;
     await flush(ignoreBackoff: true);
     _disposed = true;
     _client.close();
@@ -523,26 +302,5 @@ class TelemetryReporter with WidgetsBindingObserver {
 
   void _log(String message) {
     if (config.verbose) debugPrint('[MkPlayer] telemetry: $message');
-  }
-
-  // ── Session ids ───────────────────────────────────────────────────────────
-
-  static final _random = Random();
-
-  /// ULID-shaped id: 10 chars of timestamp + 16 random, Crockford base32 —
-  /// 26 chars of `[0-9A-Z]`, inside what the API accepts, sortable by creation
-  /// time and collision-free in practice.
-  static String _generateSessionId() {
-    const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-    var time = DateTime.now().millisecondsSinceEpoch;
-    final chars = List<String>.filled(26, '0');
-    for (var i = 9; i >= 0; i--) {
-      chars[i] = alphabet[time & 0x1F];
-      time >>= 5;
-    }
-    for (var i = 10; i < 26; i++) {
-      chars[i] = alphabet[_random.nextInt(alphabet.length)];
-    }
-    return chars.join();
   }
 }

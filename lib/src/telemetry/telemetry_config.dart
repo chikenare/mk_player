@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../playback/playback_session_tracker.dart';
+
 /// Device class reported to the telemetry API — the full set the endpoint
 /// accepts.
 enum TelemetryDeviceType {
@@ -137,6 +139,15 @@ class TelemetryConfig {
   })  : assert(maxBatchSize > 0 && maxBatchSize <= 50,
             'The API accepts between 1 and 50 events per request.'),
         assert(maxQueuedEvents > 0);
+
+  /// The measurement knobs this config implies, for the layer that produces
+  /// the events. Defined here so the two live in one place: a host configures
+  /// telemetry once and the tracker follows.
+  PlaybackSessionOptions get playbackOptions => PlaybackSessionOptions(
+        progressInterval: progressInterval,
+        bytesLoadedProvider: bytesLoadedProvider,
+        verbose: verbose,
+      );
 
   /// [appVersion] cut to the length the API accepts.
   String get wireAppVersion =>
