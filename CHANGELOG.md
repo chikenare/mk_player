@@ -13,6 +13,20 @@
   on from the first frame (what an Android TV app should pass), `disabled`
   turns key handling off entirely. Touch behaviour is unchanged in every mode.
   On TV the lock button is hidden and the centre buttons leave the focus order.
+* **A leanback layout, not just a focusable one.** While the TV skin is on, the
+  controls drop what the remote already covers and what a D-pad cannot use
+  well: the ◀ back arrow (Back does it), the ⏪ / ⏩ ±`seekSeconds` buttons
+  (← / → do it, with acceleration) and **Speed** (`controller.setSpeed` remains
+  for a host control). The centre play/pause stays as a state indicator. Touch
+  keeps every button, and a `TvMode.auto` build swaps layouts with the input.
+* **Audio & subtitles in one side panel on TV.** The two bottom sheets collapse
+  into a single **Audio & Subtitles** button that opens a panel pinned to the
+  right edge: one column per type, each only as tall as its own tracks, ↑ / ↓
+  inside a column and ← / → between them. Focus opens on the track that is
+  playing, OK applies it and keeps the panel open so the check mark moves under
+  the viewer, and Back closes it. `subtitleActions` sit under the subtitle
+  column, below a divider, and still close the panel before running. The touch
+  sheets are unchanged.
 * **`PlayerConfig.onSkipNext` / `onSkipPrevious`** — the remote's ⏮ / ⏭ keys,
   for hosts with a playlist of their own. Unset, those keys seek.
 * **`PlayerConfig.showAspectRatioButton`** — show or hide the Fit → Zoom →

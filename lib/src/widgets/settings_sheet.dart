@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../controller.dart';
 import '../models/player_config.dart';
 import '../tv/tv_focusable.dart';
+import 'track_labels.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry points — focused sheets (Netflix/Apple TV+ style)
@@ -53,7 +54,7 @@ Future<void> showAudioSheet(
             children: [
               for (var i = 0; i < tracks.length; i++)
                 _TrackTile(
-                  label: _audioLabel(tracks[i], i),
+                  label: audioTrackLabel(tracks[i], i),
                   icon: Icons.headphones_rounded,
                   isSelected: tracks[i].id == selectedId,
                   autofocus: hasSelection
@@ -101,7 +102,7 @@ Future<void> showSubtitleSheet(
               else
                 for (var i = 0; i < sources.length; i++)
                   _TrackTile(
-                    label: _subtitleLabel(sources[i], i),
+                    label: subtitleTrackLabel(sources[i], i),
                     icon:
                         sources[i].type == BetterPlayerSubtitlesSourceType.none
                             ? Icons.subtitles_off_rounded
@@ -398,23 +399,3 @@ class _EmptyHint extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-String _audioLabel(BetterPlayerAsmsAudioTrack track, int index) {
-  final label = track.label;
-  if (label != null && label.isNotEmpty) return label;
-  final lang = track.language;
-  if (lang != null && lang.isNotEmpty) return lang.toUpperCase();
-  return 'Track ${index + 1}';
-}
-
-String _subtitleLabel(BetterPlayerSubtitlesSource source, int index) {
-  if (source.type == BetterPlayerSubtitlesSourceType.none) return 'Off';
-  final name = source.name;
-  if (name != null && name.isNotEmpty && name != 'Default subtitles') {
-    return name;
-  }
-  return 'Subtitle ${index + 1}';
-}

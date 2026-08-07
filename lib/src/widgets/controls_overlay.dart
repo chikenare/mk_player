@@ -14,6 +14,7 @@ import '../tv/tv_focusable.dart';
 import 'listenable_selector.dart';
 import 'progress_bar.dart';
 import 'settings_sheet.dart';
+import 'tv_tracks_panel.dart';
 
 String _fitLabel(VideoFit fit) => switch (fit) {
       VideoFit.contain => 'Fit',
@@ -732,6 +733,10 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             config: cfg,
             isFullscreen: widget.isFullscreen,
             onToggleFullscreen: widget.onToggleFullscreen,
+            // On TV the remote's own Back key leaves the player (the overlay
+            // closes first, see [PopScope] in build) — an on-screen arrow only
+            // spends a focus stop on something the hardware already does.
+            showBack: !_tvActive,
             // The lock exists to stop pocket taps; a remote has no such
             // problem, and a locked screen is a trap without a touchscreen.
             onLock: cfg.showLockButton && !_tvActive ? _lock : null,
@@ -756,6 +761,9 @@ class _PlayerControlsOverlayState extends State<PlayerControlsOverlay>
             controller: ctrl,
             seekSeconds: cfg.seekSeconds,
             focusable: !_tvActive,
+            // The ±N second buttons duplicate what ← / → already do on a
+            // remote, and unreachable buttons are just clutter on a TV.
+            showSkip: !_tvActive,
             onActivity: _show,
             onRewind: () =>
                 _seekBy(Duration(seconds: -cfg.seekSeconds), _SeekSide.back),
@@ -878,6 +886,9 @@ class _TopBar extends StatelessWidget {
 
   final VoidCallback? onCycleFit;
 
+  /// Whether to draw the leading back arrow (off under a remote).
+  final bool showBack;
+
   const _TopBar({
     required this.controller,
     required this.config,
@@ -886,32 +897,38 @@ class _TopBar extends StatelessWidget {
     required this.onLock,
     required this.onEnterPip,
     required this.onCycleFit,
+    required this.showBack,
   });
 
   @override
   Widget build(BuildContext context) {
+    final Widget? leading = isFullscreen
+        ? _IconBtn(
+            icon: Icons.fullscreen_exit_rounded,
+            size: 24,
+            tooltip: 'Exit fullscreen',
+            onPressed: onToggleFullscreen,
+          )
+        : (showBack && Navigator.of(context).canPop())
+            ? _IconBtn(
+                icon: Icons.arrow_back_ios_new_rounded,
+                size: 20,
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null;
+
     return SafeArea(
       bottom: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
         child: Row(
           children: [
-            if (isFullscreen)
-              _IconBtn(
-                icon: Icons.fullscreen_exit_rounded,
-                size: 24,
-                tooltip: 'Exit fullscreen',
-                onPressed: onToggleFullscreen,
-              )
-            else if (Navigator.of(context).canPop())
-              _IconBtn(
-                icon: Icons.arrow_back_ios_new_rounded,
-                size: 20,
-                onPressed: () => Navigator.of(context).pop(),
-              ),
+            ?leading,
 
             if (config.showTitle && controller.currentTitle != null) ...[
-              const SizedBox(width: 4),
+              // Without a leading button the title would sit flush against the
+              // safe-area edge.
+              SizedBox(width: leading == null ? 12 : 4),
               Expanded(
                 child: Text(
                   controller.currentTitle!,
@@ -984,6 +1001,10 @@ class _CentreRow extends StatelessWidget {
   final CustomPlayerController controller;
   final int seekSeconds;
   final bool focusable;
+
+  /// Whether to flank the play/pause button with the ±[seekSeconds] buttons.
+  final bool showSkip;
+
   final VoidCallback onActivity;
   final VoidCallback onRewind;
   final VoidCallback onForward;
@@ -992,6 +1013,7 @@ class _CentreRow extends StatelessWidget {
     required this.controller,
     required this.seekSeconds,
     required this.focusable,
+    required this.showSkip,
     required this.onActivity,
     required this.onRewind,
     required this.onForward,
@@ -1002,23 +1024,27 @@ class _CentreRow extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _SkipButton(
-            seconds: seekSeconds,
-            forward: false,
-            focusable: focusable,
-            onTap: () { onRewind(); onActivity(); }),
-        const SizedBox(width: 28),
+        if (showSkip) ...[
+          _SkipButton(
+              seconds: seekSeconds,
+              forward: false,
+              focusable: focusable,
+              onTap: () { onRewind(); onActivity(); }),
+          const SizedBox(width: 28),
+        ],
         _CentreButton(
           controller: controller,
           focusable: focusable,
           onActivity: onActivity,
         ),
-        const SizedBox(width: 28),
-        _SkipButton(
-            seconds: seekSeconds,
-            forward: true,
-            focusable: focusable,
-            onTap: () { onForward(); onActivity(); }),
+        if (showSkip) ...[
+          const SizedBox(width: 28),
+          _SkipButton(
+              seconds: seekSeconds,
+              forward: true,
+              focusable: focusable,
+              onTap: () { onForward(); onActivity(); }),
+        ],
       ],
     );
   }
@@ -1281,31 +1307,55 @@ class _BottomBarState extends State<_BottomBar> {
                 return Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Row(
-                    children: [
-                      _ActionButton(
-                        icon: Icons.speed_rounded,
-                        label: speed == 1.0 ? 'Speed' : 'Speed · $speed×',
-                        onTap: () => widget.onOpenSheet(
-                          () => showSpeedSheet(context, ctrl),
-                        ),
-                      ),
-                      if (showAudio)
-                        _ActionButton(
-                          icon: Icons.multitrack_audio_rounded,
-                          label: 'Audio',
-                          onTap: () => widget.onOpenSheet(
-                            () => showAudioSheet(context, ctrl),
-                          ),
-                        ),
-                      if (showSubs)
-                        _ActionButton(
-                          icon: Icons.closed_caption_rounded,
-                          label: 'Subtitles',
-                          onTap: () => widget.onOpenSheet(
-                            () => showSubtitleSheet(context, ctrl, config: cfg),
-                          ),
-                        ),
-                    ],
+                    // On TV the two track lists collapse into one side panel —
+                    // one focus stop instead of two, and no sheet covering the
+                    // subtitles the user is choosing. Speed is dropped there:
+                    // it is a lean-forward control, and the remote's transport
+                    // keys already cover what a TV viewer reaches for.
+                    children: widget.tvActive
+                        ? [
+                            if (showAudio || showSubs)
+                              _ActionButton(
+                                icon: Icons.subtitles_rounded,
+                                label: 'Audio & Subtitles',
+                                onTap: () => widget.onOpenSheet(
+                                  () => showTvTracksPanel(
+                                    context,
+                                    ctrl,
+                                    config: cfg,
+                                  ),
+                                ),
+                              ),
+                          ]
+                        : [
+                            _ActionButton(
+                              icon: Icons.speed_rounded,
+                              label: speed == 1.0 ? 'Speed' : 'Speed · $speed×',
+                              onTap: () => widget.onOpenSheet(
+                                () => showSpeedSheet(context, ctrl),
+                              ),
+                            ),
+                            if (showAudio)
+                              _ActionButton(
+                                icon: Icons.multitrack_audio_rounded,
+                                label: 'Audio',
+                                onTap: () => widget.onOpenSheet(
+                                  () => showAudioSheet(context, ctrl),
+                                ),
+                              ),
+                            if (showSubs)
+                              _ActionButton(
+                                icon: Icons.closed_caption_rounded,
+                                label: 'Subtitles',
+                                onTap: () => widget.onOpenSheet(
+                                  () => showSubtitleSheet(
+                                    context,
+                                    ctrl,
+                                    config: cfg,
+                                  ),
+                                ),
+                              ),
+                          ],
                   ),
                 );
               },

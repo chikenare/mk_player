@@ -14,7 +14,7 @@ A self-contained, highly reusable Flutter video player built on [better_player_p
 | **Auth** | Custom HTTP headers per source (`Authorization`, `Cookie`, `User-Agent`, …) |
 | **Tracks** | Dynamic audio, subtitle and video-quality switching |
 | **Controls** | Play/pause, seek, volume, mute, speed (0.25×–4×), double-tap ±10 s |
-| **Android TV** | Full D-pad / remote navigation: focusable controls with a focus ring, arrow-key scrubbing with acceleration, media transport keys, back-hides-controls |
+| **Android TV** | Full D-pad / remote navigation: focusable controls with a focus ring, arrow-key scrubbing with acceleration, media transport keys, back-hides-controls, and a leanback chrome that drops the touch-only buttons in favour of a side-panel track picker |
 | **Thumbnails** | WebVTT storyboard scrubber preview with sprite sheet support |
 | **Fullscreen** | Landscape orientation lock + immersive SystemChrome |
 | **Wakelock** | Screen stays on during playback, released on pause/error/dispose |
@@ -745,6 +745,9 @@ A premium, streaming-app-style control layer (inspired by Netflix / Apple TV+):
   and a labeled action row: **Speed**, **Audio**, **Subtitles**
   (Audio/Subtitles appear only when the stream actually has those tracks)
 
+Under a remote the layout is trimmed to what a D-pad can reach — see
+[Remote control / Android TV](#remote-control--android-tv).
+
 | Gesture / control | Action |
 |---|---|
 | Single tap | Show / hide controls |
@@ -799,13 +802,36 @@ attached) instead of thirty separate ones.
 | `TvMode.enabled` | On from the first frame. **Use this in an Android TV app** — the controls are navigable before any key is pressed. |
 | `TvMode.disabled` | No key handling at all, touch only. |
 
-Two details worth knowing on TV: the 🔒 lock button is hidden (a locked screen
-is a trap without a touchscreen), and the centre rewind/play/forward buttons
-stay on screen as state indicators but leave the focus order, since the arrows
-belong to the seek bar there.
+#### What the TV chrome leaves out
 
-The settings sheets (Speed / Audio / Subtitles) are navigable too: opening one
-focuses the entry that is currently selected, and **Back** closes it.
+The remote already does these, so the buttons only cost focus stops:
+
+| Dropped on TV | Why · what replaces it |
+|---|---|
+| ◀ back arrow (top-left) | The remote's **Back** key: it closes the controls first, then the player |
+| ⏪ / ⏩ ±`seekSeconds` buttons | **← / →** scrub, with acceleration. The centre play/pause stays as a state indicator (out of the focus order) |
+| **Speed** | A lean-forward control; `CustomPlayerController.setSpeed` is still there for a host-supplied one |
+| 🔒 **Lock** | A locked screen is a trap without a touchscreen |
+
+The **Audio** and **Subtitles** buttons also collapse into a single
+**Audio & Subtitles** entry — see below.
+
+#### The track panel
+
+On touch, each list is a bottom sheet of its own. That costs a remote four extra
+presses and covers the very subtitles the user is trying to pick, so on TV both
+lists live in one panel pinned to the right edge:
+
+- one column per type (**Audio**, **Subtitles**), side by side, each only as
+  tall as its own entries and scrolling only if there are more tracks than fit;
+- **↑ / ↓** moves inside a column, **← / →** between columns;
+- focus opens on the track that is playing, in the leftmost column;
+- **OK** applies the track immediately and *keeps the panel open*, so a wrong
+  guess is one press away from being fixed — the check mark moves as you go;
+- **Back** (or a click on the dimmed video) closes it.
+
+`subtitleActions` entries appear under the subtitle column, below a divider, and
+still close the panel before running — they typically push a route of their own.
 
 For the manifest flags an Android TV app needs, see
 [Android TV setup](#android-tv-setup).

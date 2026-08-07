@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -279,6 +281,98 @@ void main() {
       await drain(tester);
     });
 
+    testWidgets('the TV chrome drops the touch-only controls', (tester) async {
+      // A host action keeps the subtitle entry alive without a real source, so
+      // the track control is present in both skins and only its shape differs.
+      final action = PlayerSheetAction(
+        icon: Icons.search_rounded,
+        label: 'Search online…',
+        onTap: (_) {},
+      );
+
+      await pumpOverlay(
+        tester,
+        config: PlayerConfig(
+          tvMode: TvMode.enabled,
+          subtitleActions: [action],
+        ),
+      );
+
+      // Speed, the ±10s buttons and the two separate track buttons are gone…
+      expect(find.text('Speed'), findsNothing);
+      expect(find.byIcon(Icons.replay_10_rounded), findsNothing);
+      expect(find.byIcon(Icons.forward_10_rounded), findsNothing);
+      expect(find.text('Subtitles'), findsNothing);
+      // …replaced by one entry point, next to the play/pause indicator.
+      expect(find.text('Audio & Subtitles'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      await drain(tester);
+
+      // Tear the tree down between skins: the overlay resolves the chrome once,
+      // in initState, so pumping a new config over the same element would reuse
+      // the TV state.
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // Touch keeps every one of them.
+      await pumpOverlay(
+        tester,
+        config: PlayerConfig(
+          tvMode: TvMode.disabled,
+          subtitleActions: [action],
+        ),
+      );
+      expect(find.text('Speed'), findsOneWidget);
+      expect(find.byIcon(Icons.replay_10_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.forward_10_rounded), findsOneWidget);
+      expect(find.text('Subtitles'), findsOneWidget);
+      expect(find.text('Audio & Subtitles'), findsNothing);
+      await drain(tester);
+    });
+
+    testWidgets('the track panel opens on the right and closes on back',
+        (tester) async {
+      var searched = 0;
+      await pumpOverlay(
+        tester,
+        config: PlayerConfig(
+          tvMode: TvMode.enabled,
+          subtitleActions: [
+            PlayerSheetAction(
+              icon: Icons.search_rounded,
+              label: 'Search online…',
+              onTap: (_) => searched++,
+            ),
+          ],
+        ),
+      );
+
+      // Reveal the bar first: while it is faded out the controls ignore input.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+
+      await tester.tap(find.text('Audio & Subtitles'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // One column per type, and no audio column with nothing to choose from.
+      expect(find.text('SUBTITLES'), findsOneWidget);
+      expect(find.text('AUDIO'), findsNothing);
+      expect(find.text('Search online…'), findsOneWidget);
+
+      // Pinned to the right half of the screen, hugging its content.
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final panel = tester.getRect(find.text('SUBTITLES'));
+      expect(panel.left, greaterThan(screen.width / 2));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('SUBTITLES'), findsNothing);
+      expect(searched, 0);
+
+      await drain(tester);
+    });
+
     testWidgets('TvMode.disabled ignores the remote entirely', (tester) async {
       await pumpOverlay(
         tester,
@@ -290,6 +384,40 @@ void main() {
       await tester.pump();
       expect(find.text('10s'), findsNothing);
 
+      await drain(tester);
+    });
+
+    // The back arrow only exists on a route that can pop, which the plain
+    // harness above is not.
+    testWidgets('the back arrow is touch-only', (tester) async {
+      final backArrow = find.byIcon(Icons.arrow_back_ios_new_rounded);
+
+      Future<void> pumpPushed(PlayerConfig config) async {
+        final controller = CustomPlayerController(config: config);
+        addTearDown(controller.dispose);
+        final nav = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(MaterialApp(
+          navigatorKey: nav,
+          home: const Scaffold(body: SizedBox.expand()),
+        ));
+        unawaited(nav.currentState!.push(MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            body: PlayerControlsOverlay(
+              controller: controller,
+              config: config,
+            ),
+          ),
+        )));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1)); // route transition
+      }
+
+      await pumpPushed(const PlayerConfig(tvMode: TvMode.disabled));
+      expect(backArrow, findsOneWidget);
+      await drain(tester);
+
+      await pumpPushed(const PlayerConfig(tvMode: TvMode.enabled));
+      expect(backArrow, findsNothing);
       await drain(tester);
     });
   });

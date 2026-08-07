@@ -407,12 +407,32 @@ after the last press, previewing the target on the bar meanwhile.
 Volume, home and channel keys are never intercepted — they stay with the
 system, which is what a TV user expects.
 
+### The TV layout
+
+While the TV skin is on, the controls drop every button the remote already
+covers — each one is a focus stop the user has to travel through:
+
+| Dropped | Replaced by |
+|---|---|
+| ◀ back arrow (top-left) | the **Back** key (controls first, then the player) |
+| ⏪ / ⏩ ±`seekSeconds` | ← / → scrubbing; the centre play/pause stays as a state indicator, out of the focus order |
+| **Speed** | nothing on screen — `controller.setSpeed()` for a host-supplied control |
+| 🔒 **Lock** | nothing: a locked player is a trap without a touchscreen |
+
+**Audio** and **Subtitles** become a single **Audio & Subtitles** button that
+opens a panel pinned to the right edge: one column per type, each as tall as its
+own entries, ↑/↓ inside a column and ←/→ between them. Focus opens on the track
+that is playing; OK applies it and keeps the panel open (the check mark moves),
+Back closes it. `subtitleActions` sit under the subtitle column and still close
+the panel before running.
+
+Nothing here is configurable per-button — it follows the TV skin, so a
+`TvMode.auto` build swaps layouts the moment a remote is used and swaps back for
+a finger. `showLockButton` / `showAspectRatioButton` still govern the touch case.
+
 ### Notes
 
-* The 🔒 lock button is hidden while the TV skin is on: without a touchscreen a
-  locked player is a trap. `showLockButton` still governs the touch case.
-* The centre rewind/play/forward buttons stay visible as state indicators but
-  leave the focus order — the arrows belong to the seek bar there.
+
 * `showControls: false` still turns everything off, key handling included, for
   hosts that ship their own focusable TV layout.
 * Nothing here is Android-only in Dart terms: the same keys work from a
