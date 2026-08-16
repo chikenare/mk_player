@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:better_player_plus/better_player_plus.dart';
+import 'package:better_player/better_player.dart';
 import 'package:flutter/widgets.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -45,7 +45,7 @@ BoxFit _boxFitOf(VideoFit fit) => switch (fit) {
 /// Create one instance per screen/route, pass it to [PlayerView], and dispose
 /// it when the widget leaves the tree (e.g. in [State.dispose]).
 ///
-/// Backed by `better_player_plus` (ExoPlayer on Android).
+/// Backed by `better_player` (ExoPlayer on Android).
 class CustomPlayerController extends ChangeNotifier {
   // ── better_player core ───────────────────────────────────────────────────
 
@@ -165,9 +165,9 @@ class CustomPlayerController extends ChangeNotifier {
 
   // ── Tracks (HLS/DASH ASMS) ───────────────────────────────────────────────────
 
-  // better_player_plus parses .mpd manifests with its HLS parser and finds
-  // nothing, so DASH audio tracks are parsed on our side (DashSideLoader) and
-  // surfaced through the same getter.
+  // better_player's own MPD parser only sees `Representation/BaseURL` tracks,
+  // so DASH audio is parsed on our side (DashSideLoader, SegmentTemplate
+  // included) and surfaced through the same getter.
   List<BetterPlayerAsmsAudioTrack> _dashAudioTracks = const [];
 
   // Invalidates in-flight DASH side loads when a new load begins (e.g. an
@@ -427,9 +427,9 @@ class CustomPlayerController extends ChangeNotifier {
     }
   }
 
-  /// better_player_plus never extracts tracks/subtitles from DASH manifests
-  /// (it runs its HLS parser on the .mpd), so they are parsed here and
-  /// injected into the player's own lists.
+  /// better_player's own MPD parsing is disabled for DASH (see
+  /// [_buildDataSource]), so tracks/subtitles are parsed here and injected
+  /// into the player's own lists.
   ///
   /// Only the manifest is fetched here, so audio/quality/subtitle menus fill
   /// as soon as it parses; fMP4 subtitle segments download on selection
@@ -527,6 +527,13 @@ class CustomPlayerController extends ChangeNotifier {
       bufferForPlaybackAfterRebufferMs: config.bufferForPlaybackAfterRebufferMs,
     );
 
+    // better_player parses `.mpd` manifests itself, but only reads tracks that
+    // carry a `Representation/BaseURL` — SegmentTemplate streams (and their
+    // wvtt-in-fMP4 subtitles) yield nothing or entries with an empty URL. For
+    // DASH we therefore turn its ASMS parsing off and let DashSideLoader be the
+    // single source of tracks/subtitles, which also avoids duplicate entries.
+    final isDash = _videoFormatOf(source) == BetterPlayerVideoFormat.dash;
+
     return BetterPlayerDataSource(
       source.isLocal
           ? BetterPlayerDataSourceType.file
@@ -537,6 +544,9 @@ class CustomPlayerController extends ChangeNotifier {
       liveStream: source.isLive,
       videoFormat: _videoFormatOf(source),
       bufferingConfiguration: buffering,
+      useAsmsSubtitles: !isDash,
+      useAsmsTracks: !isDash,
+      useAsmsAudioTracks: !isDash,
     );
   }
 

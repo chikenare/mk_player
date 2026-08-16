@@ -1,6 +1,6 @@
 # mk_player
 
-A self-contained, highly reusable Flutter video player built on [better_player_plus](https://pub.dev/packages/better_player_plus) (ExoPlayer on Android). Drop it into any app and get a premium streaming experience with zero boilerplate.
+A self-contained, highly reusable Flutter video player built on [better_player](https://github.com/chikenare/betterplayer) (ExoPlayer on Android). Drop it into any app and get a premium streaming experience with zero boilerplate.
 
 > **Platform support:** Android only.
 
@@ -30,8 +30,8 @@ A self-contained, highly reusable Flutter video player built on [better_player_p
 | Platform | Minimum version |
 |---|---|
 | Android | SDK 21 |
-| Flutter | 3.41 |
-| Dart | 3.11 |
+| Flutter | 3.47 |
+| Dart | 3.12 |
 
 ---
 
@@ -507,7 +507,7 @@ from local storage has to report 0. On Android that means an ExoPlayer
 `AnalyticsListener` in the plugin: either `onBandwidthEstimate(…,
 totalBytesLoaded, …)`, or the sum of `LoadEventInfo.bytesLoaded` in
 `onLoadCompleted` for finer granularity, exposed over a method channel. **This
-bridge lives in the `better_player_plus` fork, not in this package, and is not
+bridge lives in the `better_player` fork, not in this package, and is not
 implemented yet** — until it is, the field is absent from every payload and the
 bandwidth metric stays empty.
 
@@ -636,7 +636,7 @@ await controller.retry();          // re-open last source after an error
 ### Track management
 
 Tracks are parsed from the HLS/DASH manifest after the source opens and use
-`better_player_plus` types (re-exported from `mk_player`):
+`better_player` types (re-exported from `mk_player`):
 
 ```dart
 final audios    = controller.audioTracks;     // List<BetterPlayerAsmsAudioTrack>
@@ -1208,7 +1208,7 @@ lib/
 
 | Package | Purpose |
 |---|---|
-| `better_player_plus` (1.2.1) | Core player engine (ExoPlayer on Android) |
+| `better_player` (0.4.3, git fork) | Core player engine (ExoPlayer on Android) |
 | `wakelock_plus` | Screen sleep prevention |
 | `path_provider` | Location of the persistent telemetry queue |
 | `xml` | DASH manifest parsing |

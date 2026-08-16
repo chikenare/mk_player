@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:better_player_plus/better_player_plus.dart';
+import 'package:better_player/better_player.dart';
 import 'package:flutter/foundation.dart';
 
 import 'dash_manifest.dart';
@@ -36,8 +36,8 @@ class DashSideData {
 }
 
 /// Fetches and parses a DASH manifest on the Dart side, working around
-/// better_player_plus 1.2.x parsing `.mpd` manifests with its HLS parser
-/// (which yields no tracks and no subtitles).
+/// better_player's own MPD parser, which only reads tracks declared with a
+/// `Representation/BaseURL` and so yields nothing for SegmentTemplate streams.
 ///
 /// [load] only performs the (retried) manifest fetch, so tracks surface as
 /// soon as the MPD parses. `wvtt`-in-fMP4 subtitle segments — potentially
@@ -82,7 +82,6 @@ class DashSideLoader {
           label: t.label,
           language: t.language,
           mimeType: t.mimeType,
-          isDefault: t.isDefault,
         ),
     ];
 

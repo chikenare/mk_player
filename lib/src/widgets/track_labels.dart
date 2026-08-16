@@ -1,4 +1,4 @@
-import 'package:better_player_plus/better_player_plus.dart';
+import 'package:better_player/better_player.dart';
 
 // Shared between the touch sheets (settings_sheet.dart) and the TV side panel
 // (tv_tracks_panel.dart) so both name a track the same way.

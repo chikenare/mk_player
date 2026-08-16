@@ -81,8 +81,8 @@ class DashTextTrack {
 
 /// Track metadata parsed from a DASH MPD manifest.
 ///
-/// better_player_plus 1.2.x parses `.mpd` manifests with its **HLS** parser,
-/// which never matches, so DASH streams expose no audio tracks, qualities or
+/// better_player's own MPD parser only reads representations that declare a
+/// `BaseURL`, so SegmentTemplate streams expose no audio tracks, qualities or
 /// embedded subtitles. This parser recovers that metadata on the Dart side.
 ///
 /// Only the first `Period` is inspected. `SegmentTemplate` (with

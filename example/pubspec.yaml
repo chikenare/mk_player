@@ -4,7 +4,7 @@ publish_to: none
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.11.5
+  sdk: ^3.12.0
 
 dependencies:
   flutter:
@@ -20,5 +20,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-dependency_overrides:
-  wakelock_plus: 1.5.2

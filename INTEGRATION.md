@@ -156,7 +156,7 @@ await _controller.openPlaylist([
 
 ## 7. Track management
 
-Tracks use `better_player_plus` types, re-exported from `mk_player`
+Tracks use `better_player` types, re-exported from `mk_player`
 (`BetterPlayerAsmsAudioTrack`, `BetterPlayerAsmsTrack`,
 `BetterPlayerSubtitlesSource`).
 

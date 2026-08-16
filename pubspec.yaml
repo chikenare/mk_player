@@ -1,20 +1,21 @@
 name: mk_player
+publish_to: 'none'
 description: >
   A highly reusable, self-contained Flutter video player built on
-  better_player_plus (ExoPlayer on Android). Supports HLS, DASH, local files,
+  better_player (ExoPlayer on Android). Supports HLS, DASH, local files,
   HTTP headers, track management, wakelock, and a premium streaming UI.
 version: 1.0.0
 homepage: https://github.com/yourorg/mk_player
 
 environment:
-  sdk: ^3.11.5
-  flutter: ">=3.41.0"
+  sdk: ^3.12.0
+  flutter: ">=3.47.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  better_player_plus: 
-    git: https://github.com/chikenare/better_player_plus.git
+  better_player:
+    git: https://github.com/chikenare/betterplayer
   wakelock_plus: ^1.7.0
   xml: ^7.0.1
   path_provider: ^2.1.4
